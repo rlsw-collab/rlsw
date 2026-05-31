@@ -190,3 +190,324 @@ async def generate_audio_clean_raw(speak_text, custom_rate="-60%"):
 def generate_true_mp3_silence(seconds):
     frames_needed = int((seconds * 1000) / 24)
     single_frame = b"\xFF\xF3\x64\xC4" + (b"\x00" * 284)
+    return single_frame * frames_needed
+
+def smart_split_sentence(text, target_len=14):
+    clean_text = text.replace("\r", "").replace("\n", "").strip()
+    protected = clean_text.replace("：「", "【冒引】").replace("：“", "【冒引】")
+    protected = protected.replace("。」", "【句引】").replace("」。", "【句引】")
+    protected = protected.replace("！”", "【感引】").replace("！」", "【感引】")
+    
+    strong_ends = ['。', '！', '？', '；', '——']
+    split_chars = ['，', '、']
+    
+    sub_sentences = []
+    current_chunk = ""
+    current_char_count = 0
+    
+    for char in protected:
+        current_chunk += char
+        if char not in (strong_ends + split_chars + ['《', '》', '·']):
+            current_char_count += 1
+            
+        if char in strong_ends or (current_char_count >= target_len and char in split_chars):
+            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」").replace("【感引】", "！”")
+            if chunk_restore.strip(): sub_sentences.append(chunk_restore.strip())
+            current_chunk = ""
+            current_char_count = 0
+            
+    if current_chunk.strip():
+        chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」").replace("【感引】", "！”")
+        sub_sentences.append(chunk_restore.strip())
+        
+    final_sentences = []
+    for s in sub_sentences:
+        if final_sentences and s[0] in ['，', '、', '。', '！', '？', '；', '：', '」', '》', '』', '”']:
+            final_sentences[-1] = final_sentences[-1] + s
+        else:
+            final_sentences.append(s)
+    return final_sentences
+
+# ==========================================================
+# 🎨 UI & 安全防護鎖
+# ==========================================================
+st.set_page_config(layout="wide")
+st.title("📖 智能普通話默書機 v1.8.1-FinalPerfect")
+
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+if "current_lesson_title" not in st.session_state:
+    st.session_state["current_lesson_title"] = ""
+if "instant_audio_bytes" not in st.session_state:
+    st.session_state["instant_audio_bytes"] = None
+
+if not st.session_state["authenticated"]:
+    st.subheader("🔐 安全密碼驗證")
+    pwd_input = st.text_input("請輸入專屬訪問密碼：", type="password")
+    if st.button("確認登入"):
+        if pwd_input == "royroy":
+            st.session_state["authenticated"] = True
+            st.success("🔓 驗證成功！正在解鎖默書機...")
+            time.sleep(0.5)
+            st.rerun()
+        else:
+            st.error("❌ 密碼錯誤，拒絕訪問！")
+    st.stop()
+
+# ==========================================================
+# 🔓 解鎖後的完整介面
+# ==========================================================
+current_text = read_from_vault()
+text_hash = str(len(current_text)) + "_" + str(hash(current_text))
+
+tab1, tab2, tab3 = st.tabs(["📸 1. Gemini 核心智能影相辨識", "✍️ 2. 雲端舊課文載入與修改", "📢 3. 曉曉老師聽寫專區"])
+
+with tab1:
+    st.subheader("📸 拍下課本圖片（由 Gemini 大腦強勢過濾拼音、100%防加戲）")
+    files = st.file_uploader("請上傳或拍攝課文圖片（可多選組合）：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="up_t1")
+    if files:
+        cols = st.columns(min(len(files), 5))
+        for i, f in enumerate(files): cols[i % 5].image(Image.open(f), use_container_width=True)
+            
+        if st.button("🚀 執行 Gemini 視覺直讀識別（秒殺一切拼音雜訊）", key="ocr_btn_t1"):
+            with st.spinner("🔮 Google Gemini 視覺大腦正全速透視大字中，請稍候..."):
+                b64_list = [convert_image_to_base64(f) for f in files]
+                clean_extracted_text = gemini_vision_extract(b64_list)
+                write_to_vault(clean_extracted_text)
+                st.session_state["instant_audio_bytes"] = None
+                st.success("✨ Gemini 完美原文已成功解鎖，請在下方查看！")
+                st.rerun()
+                
+    t1 = st.text_area("課文內容 Text Box (AI 識別後可在此進行檢查微調)", value=current_text, height=250, key=f"t1_{text_hash}")
+    if t1 != current_text: write_to_vault(t1)
+
+    st.subheader("💾 將新識別的課文儲存到雲端")
+    c1, c2 = st.columns([3, 1])
+    with c1: title_t1 = st.text_input("請輸入課文標題：", placeholder="例如：半杯水", key="title_t1")
+    with c2:
+        st.write(" ")
+        st.write(" ")
+        if st.button("💾 確認儲存至 Git", key="save_btn_t1"):
+            if not title_t1.strip() or not current_text.strip(): st.error("標題和內容不能為空！")
+            else:
+                with st.spinner("同步中..."):
+                    if save_to_github(title_t1.strip(), current_text): 
+                        st.session_state["current_lesson_title"] = title_t1.strip()
+                        st.session_state["instant_audio_bytes"] = None
+                        st.success("成功同步至 GitHub 雲端！")
+
+with tab2:
+    lessons = load_all_lessons()
+    sel = st.selectbox("📂 選取雲端舊課文：", ["-- 請選擇課文 --"] + lessons, key="select_t2")
+    
+    c_load, c_del = st.columns([1, 1])
+    with c_load:
+        if st.button("📥 確認載入選取課文", key="load_btn_t2"):
+            if sel != "-- 請選擇課文 --":
+                write_to_vault(load_single_lesson(sel))
+                st.session_state["current_lesson_title"] = sel
+                st.session_state["instant_audio_bytes"] = None
+                st.rerun()
+                
+    with c_del:
+        if sel != "-- 請選擇課文 --":
+            if st.button("🗑️ 徹底刪除雲端課文及音軌快取", key="del_btn_t2", type="primary"):
+                with st.spinner(f"💥 正在從雲端徹底剷除《{sel}》的文字與 MP3 檔..."):
+                    txt_ok = delete_from_github(sel)
+                    mp3_ok = delete_audio_from_github(sel)
+                    if txt_ok:
+                        write_to_vault("") 
+                        st.session_state["current_lesson_title"] = ""
+                        st.session_state["instant_audio_bytes"] = None
+                        st.success(f"✨ 剷除成功！《{sel}》的文字檔及雲端聲帶快取已被永久消滅！")
+                        time.sleep(1)
+                        st.rerun()
+            
+    t2 = st.text_area("課文內容 Text Box", value=current_text, height=250, key=f"t2_{text_hash}")
+    if t2 != current_text: write_to_vault(t2)
+    
+    st.subheader("💾 重新儲存/覆蓋課文到雲端")
+    c3, c4 = st.columns([3, 1])
+    with c3:
+        default_name = sel if sel != "-- 請選擇課文 --" else ""
+        title_t2 = st.text_input("請輸入課文標題：", value=default_name, key="title_t2")
+    if st.button("💾 確認儲存至 Git", key="save_btn_t2"):
+        if not title_t2.strip() or not current_text.strip(): st.error("標題和內容不能為空！")
+        else:
+            with st.spinner("同步中..."):
+                if save_to_github(title_t2.strip(), current_text): 
+                    st.session_state["current_lesson_title"] = title_t2.strip()
+                    st.session_state["instant_audio_bytes"] = None
+                    st.success("成功同步至 GitHub 雲端！")
+
+with tab3:
+    st.subheader("📢 曉曉老師聽寫默書專區")
+    
+    lessons_t3 = load_all_lessons()
+    sel_t3 = st.selectbox("📂 聽寫專區直接選取雲端舊課文：", ["-- 請選擇課文 --"] + lessons_t3, key="select_t3")
+    if st.button("📥 確認切換並載入聽寫課文", key="load_btn_t3"):
+        if sel_t3 != "-- 請選擇課文 --":
+            write_to_vault(load_single_lesson(sel_t3))
+            st.session_state["current_lesson_title"] = sel_t3 
+            st.session_state["instant_audio_bytes"] = None 
+            st.rerun()
+            
+    st.markdown("---")
+    st.markdown("#### ⚙️ 曉曉老師發音參數調節面板")
+    speed_percent = st.slider(
+        "請調較曉曉老師的普通話語速（僅用於全新生成）：", 
+        min_value=-80, 
+        max_value=0, 
+        value=-60, 
+        step=5,
+        format="%d%%"
+    )
+    custom_rate_str = f"{speed_percent}%"
+    
+    st.markdown("---")
+    st.markdown("#### 📖 當前準備默書的課文內容：")
+    active_title = st.session_state["current_lesson_title"]
+    if active_title:
+        st.markdown(f"**當前載入課文：** 🏆 `{active_title}`" )
+    
+    if current_text.strip():
+        st.markdown(
+            f"""
+            <div style="background-color: white; padding: 15px; border-radius: 5px; border: 1px solid #ddd; color: black; font-size: 16px; line-height: 1.6; white-space: pre-wrap; font-weight: 500;">
+            {current_text}
+            </div>
+            """, 
+            unsafe_allow_html=True
+        )
+    else: st.info("目前保險箱內沒有課文數據。")
+    
+    if current_text.strip():
+        raw_paragraphs = [p.strip() for p in re.split(r'\n+', current_text) if p.strip()]
+        
+        dictation_units = []
+        for p_idx, p_text in enumerate(raw_paragraphs):
+            p_sentences = smart_split_sentence(p_text)
+            for s_idx, s_text in enumerate(p_sentences):
+                if s_text.strip():
+                    p_label = f"第{p_idx + 1}段" if s_idx == 0 else ""
+                    dictation_units.append((p_label, s_text))
+        
+        st.markdown("---")
+        st.markdown("### 🎵 雲端已存音軌快取庫 (多速度點播面板)")
+        
+        if active_title:
+            with st.spinner(f"🔍 正在盤點雲端《{active_title}》的所有語速音軌..."):
+                cached_tracks = scan_lesson_cached_audios(active_title)
+            
+            if cached_tracks:
+                st.success(f"✨ 成功在雲端搵到 {len(cached_tracks)} 個不同語速的版本！想播邊個直接撳 Play：")
+                for speed_text, filename in cached_tracks:
+                    with st.expander(f"▶️ 點擊展開點播：【語速 {speed_text}】完整聽寫連續軌", expanded=True):
+                        audio_data = load_specific_audio_by_filename(filename)
+                        if audio_data:
+                            st.audio(audio_data, format="audio/mp3")
+                        else:
+                            st.error(f"⚠️ 檔案 `{filename}` 讀取失敗。提示：新版本代碼已修復網址特殊符號，請使用下方按鈕重新一鍵生成即可永久秒播！")
+            else:
+                st.info("💡 雲端目前尚未有任何語速的音軌快取。請在下方進行【全新生成】。")
+        else:
+            st.info("💡 請先在上方選取並確認載入課文，即可透視雲端快取庫。")
+            
+        st.markdown("---")
+        st.markdown(f"#### 🚀 產生新快取：全篇自動連續聽寫（當前設定語速 {custom_rate_str}）")
+        
+        if st.session_state["instant_audio_bytes"] is not None:
+            st.warning(f"🔥 剛生成完畢！下方為【{custom_rate_str}】即時緩衝音軌（後台同步至雲端中，稍後刷新即可收入上方快取庫）：")
+            st.audio(st.session_state["instant_audio_bytes"], format="audio/mp3")
+
+        if st.button("🏁 一鍵產生【整篇連續默書】音軌", key="play_all_btn"):
+            progress_text = f"曉曉老師正在以【{custom_rate_str}】語速全速封裝最高規格聽寫軌中，請稍候..."
+            my_bar = st.progress(0, text=progress_text)
+            
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            silence_0_5s = generate_true_mp3_silence(0.5) 
+            silence_4_0s = generate_true_mp3_silence(4.0) 
+            silence_8_0s = generate_true_mp3_silence(8.0) 
+            
+            mp3_final_list = []
+            total_lines = len(dictation_units)
+            
+            for idx, (p_label, s_text) in enumerate(dictation_units):
+                pct = int(((idx) / total_lines) * 100)
+                my_bar.progress(pct, text=f"⏳ 正在以 {custom_rate_str} 合成第 {idx+1}/{total_lines} 句...")
+                
+                text_with_breathes = convert_punctuation_to_words(s_text)
+                blocks = [b.strip() for b in re.split(r'(逗號|句號|感嘆號|問號|分號|冒號|頓號|開書名號|關書名號|開引號|關引號|破折號)', text_with_breathes) if b.strip()]
+                
+                sentence_audio_stream = b""
+                for blk in blocks:
+                    blk_clean = re.sub(r'[\s·\裝]', '', blk)
+                    blk_audio = loop.run_until_complete(generate_audio_clean_raw(blk_clean, custom_rate=custom_rate_str))
+                    if blk_audio:
+                        sentence_audio_stream += blk_audio + silence_0_5s
+                
+                if sentence_audio_stream:
+                    unit_stream = b""
+                    if p_label:
+                        label_audio = loop.run_until_complete(generate_audio_clean_raw(p_label, custom_rate="-30%"))
+                        if label_audio: unit_stream += label_audio + silence_0_5s
+                    
+                    unit_stream += sentence_audio_stream + silence_4_0s + sentence_audio_stream + silence_8_0s
+                    mp3_final_list.append(unit_stream)
+                    
+            loop.close()
+            
+            if mp3_final_list:
+                full_mp3 = b"".join(mp3_final_list)
+                my_bar.progress(100, text="🎉 音軌全面合成完畢！")
+                
+                st.session_state["instant_audio_bytes"] = full_mp3
+                
+                if active_title:
+                    with st.spinner(f"💾 正在自動將完美音軌上傳為雲端 【{custom_rate_str}】 語速快取存檔..."):
+                        # 🌟 傳入純數字 speed_percent，剔除百分比符號干擾
+                        save_audio_to_github(active_title, str(speed_percent), full_mp3)
+                
+                st.success(f"✨ 備份成功！【{custom_rate_str}】語速音軌已送往雲端，請等待 2 秒後重新整理網頁！")
+                time.sleep(2)
+                st.rerun()
+            else: 
+                st.error("⚠️ 音軌生成失敗。")
+                my_bar.empty()
+            
+        st.markdown("---")
+        st.markdown("#### 🎯 自由控速區：一句句單獨加操 (根據上面調節面板語速)")
+        for idx, (p_label, s_text) in enumerate(dictation_units):
+            display_text = f"【{p_label}】{s_text}" if p_label else s_text
+            col_text, col_audio = st.columns([4, 2])
+            with col_text: st.write(f"第 {idx+1} 句： `{display_text}`")
+            with col_audio:
+                if st.button(f"📢 聽寫第 {idx+1} 句", key=f"single_btn_{idx}"):
+                    with st.spinner("合成中..."):
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        
+                        silence_0_5s = generate_true_mp3_silence(0.5)
+                        silence_4_0s = generate_true_mp3_silence(4.0)
+                        silence_8_0s = generate_true_mp3_silence(8.0)
+                        
+                        text_with_breathes = convert_punctuation_to_words(s_text)
+                        blocks = [b.strip() for b in re.split(r'(逗號|句號|感嘆號|問號|分號|冒號|頓號|開書名號|關書名號|開引號|關引號|破折號)', text_with_breathes) if b.strip()]
+                        
+                        sentence_audio_stream = b""
+                        for blk in blocks:
+                            blk_clean = re.sub(r'[\s·\裝]', '', blk)
+                            blk_audio = loop.run_until_complete(generate_audio_clean_raw(blk_clean, custom_rate=custom_rate_str))
+                            if blk_audio: sentence_audio_stream += blk_audio + silence_0_5s
+                        
+                        unit_stream = b""
+                        if p_label:
+                            label_audio = loop.run_until_complete(generate_audio_clean_raw(p_label, custom_rate="-30%"))
+                            if label_audio: unit_stream += label_audio + silence_0_5s
+                        
+                        if sentence_audio_stream:
+                            unit_stream += sentence_audio_stream + silence_4_0s + sentence_audio_stream + silence_8_0s
+                            st.audio(unit_stream, format="audio/mp3")
+                        loop.close()
