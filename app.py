@@ -1,10 +1,10 @@
-import pytesseract
 import time
 import os
 import re
 import base64
 import requests
 from PIL import Image
+import io
 import streamlit as st
 from azure.ai.inference import ChatCompletionsClient  
 from azure.core.credentials import AzureKeyCredential
@@ -12,11 +12,8 @@ import edge_tts
 import asyncio
 
 # ==========================================================
-# ⚙️ 設定區
+# ⚙️ 設定區 (已徹底廢除 pytesseract，無需再設定 exe 路徑)
 # ==========================================================
-if os.path.exists(r'C:\Program Files\Tesseract-OCR\tesseract.exe'):
-    pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
-
 AI_TOKEN = st.secrets["AI_TOKEN"] if "AI_TOKEN" in st.secrets else ""
 GIT_TOKEN = st.secrets["GIT_TOKEN"] if "GIT_TOKEN" in st.secrets else ""
 GH_USER = "rlsw-collab"
@@ -103,22 +100,52 @@ def load_single_lesson(title):
     res = requests.get(url, headers={"Authorization": f"token {GIT_TOKEN}"})
     return base64.b64decode(res.json()["content"]).decode("utf-8") if res.status_code == 200 else ""
 
-def ai_correct_text(bad_text):
+def convert_image_to_base64(uploaded_file):
+    """將上傳的圖片轉成 Base64 數據流，方便直餵 GPT 視覺模型"""
+    image = Image.open(uploaded_file)
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    buffered = io.BytesIO()
+    image.save(buffered, format="JPEG")
+    return base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+def ai_vision_extract_text(base64_images_list):
+    """🌟 革命性更新：利用 GPT-4o 視覺多模態能力，看圖逐字謄寫，徹底拔除『自作聰明加戲』的劣根性！"""
+    if not base64_images_list: return ""
     try:
         client = ChatCompletionsClient(endpoint="https://models.inference.ai.azure.com", credential=AzureKeyCredential(AI_TOKEN))
-        prompt = """你是一個專門修復小學課文 OCR 錯誤的頂級嚴格專家。
-        傳進來的文本可能夾雜了大量的拼音、英文字母、數字（如①、②）和無意義亂碼。
-
-        【🔥 鐵獸級硬性任務——違者扣分】：
-        1. 保持原文的「體裁」與「字詞」絕對不變！如果原文是古文（文言文），必須 100% 輸出古文，絕對禁止將古文翻譯成白話文！
-        2. 徹底剔除所有拼音、英文字母及無意義的圓圈數字標號（例如刪除 ①、②、③ 等）。
-        3. 根據 OCR 殘缺字進行字形修正，輸出 100% 精準的【繁體中文課文原文】。
-        4. 嚴格做到「不新增任何課文沒有的句子、不重組段落、不作任何意譯與演繹」。
-        5. 絕對不要包含 any Markdown 語法標籤、註解或你的額外解釋，直接輸出修復後的純淨課文。"""
         
-        response = client.complete(messages=[{"role": "user", "content": prompt + "\n" + bad_text}], model="gpt-4o")
+        # 建立視覺流專屬的鋼鐵死命令 Prompt
+        messages_content = [
+            {
+                "type": "text",
+                "text": """你是一個極度嚴格、只會按圖謄寫的文字記錄員。
+                你現在看到的圖片是小學課本。圖片中包含漢字、拼音、干擾圓圈數字（如①、②）。
+
+                【🔥 鋼鐵律令——違者徹底扣分罷工】：
+                1. 只能「逐字謄寫」你在圖片中親眼看到的繁體中文字。
+                2. 絕對禁止將古文（文言文）意譯或改寫成白話文！圖片是文言文就必須輸出文言文！
+                3. 絕對禁止根據課文主題自己編造、續寫、或添加任何原圖沒有的總結與評論！
+                4. 徹底過濾並刪除所有的普通話拼音字元、英文字母、以及小圓圈數字標號（如 ①、②、③）。
+                5. 保持課本原本的自然段落順序與全形標點符號。
+                6. 絕對不要輸出任何 Markdown 標籤（如 ```）、註解或你的解釋，直接吐出純淨課文。"""
+            }
+        ]
+        
+        # 將多張圖片以 Base64 格式打包進去，實現多圖聯合辨識
+        for b64_str in base64_images_list:
+            messages_content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{b64_str}"}
+            })
+            
+        response = client.complete(
+            messages=[{"role": "user", "content": messages_content}],
+            model="gpt-4o"
+        )
         return response.choices[0].message.content.strip()
-    except: return bad_text
+    except Exception as e:
+        return f"視覺辨識出錯: {str(e)}"
 
 def convert_punctuation_to_words(text):
     text = text.replace("，", "逗號").replace(",", "逗號")
@@ -176,12 +203,12 @@ def smart_split_sentence(text, target_len=14):
             current_char_count = 0
             
     if current_chunk.strip():
-        chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」").replace("【感引】", "結構！」")
+        chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」").replace("【感引】", "！」")
         sub_sentences.append(chunk_restore.strip())
         
     final_sentences = []
     for s in sub_sentences:
-        if final_sentences and s[0] in ['，', '、', '。', '！', '？', '；', '：', '」', '》', '』', '”']:
+        if final_sentences and s[0] in ['，', '、', '。', '！', '？', '；', '：', '」', '開引號', '》', '』', '”']:
             final_sentences[-1] = final_sentences[-1] + s
         else:
             final_sentences.append(s)
@@ -191,13 +218,11 @@ def smart_split_sentence(text, target_len=14):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能普通話默書機 v1.2.4-Secure")
+st.title("📖 智能普通話默書機 v1.2.5-Ultimate")
 
-# 🟢 核心防護：建立 Session 密碼狀態驗證機制
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 
-# 如果未驗證，強制彈出密碼框輸入框，物理阻斷下方所有功能代碼
 if not st.session_state["authenticated"]:
     st.subheader("🔐 安全密碼驗證")
     pwd_input = st.text_input("請輸入專屬訪問密碼：", type="password")
@@ -209,7 +234,6 @@ if not st.session_state["authenticated"]:
             st.rerun()
         else:
             st.error("❌ 密碼錯誤，拒絕訪問！")
-    # 未通過密碼驗證時，物理終止整個 Script 運行
     st.stop()
 
 # ==========================================================
@@ -226,12 +250,13 @@ with tab1:
         cols = st.columns(min(len(files), 5))
         for i, f in enumerate(files): cols[i % 5].image(Image.open(f), use_container_width=True)
             
-        if st.button("🚀 執行多圖聯合 AI OCR 識別與修復", key="ocr_btn_t1"):
-            text = ""
-            with st.spinner("GPT-4o 正在全速識別並修正課文..."):
-                for f in files: text += pytesseract.image_to_string(Image.open(f), config=r'-l chi_tra+chi_sim --psm 3') + "\n"
-                write_to_vault(ai_correct_text(text))
-                st.success("✨ 文字已成功鎖定在下方文字框！")
+        if st.button("🚀 執行多圖聯合 AI 視覺直接識別（無需過度演繹）", key="ocr_btn_t1"):
+            with st.spinner("GPT-4o 視覺多模態正在精準看圖謄寫課文..."):
+                # 🟢 核心改變：直接將圖片轉 Base64 餵給 GPT-4o 視覺模型，跳過爛碼 OCR 階段！
+                b64_list = [convert_image_to_base64(f) for f in files]
+                clean_extracted_text = ai_vision_extract_text(b64_list)
+                write_to_vault(clean_extracted_text)
+                st.success("✨ 100% 原文純淨文字已成功鎖定在下方文字框！")
                 st.rerun()
                 
     t1 = st.text_area("課文內容 Text Box (可在此進行手動調整)", value=current_text, height=250, key=f"t1_{text_hash}")
@@ -286,7 +311,7 @@ with tab2:
         st.write(" ")
         st.write(" ")
         if st.button("💾 確認儲存至 Git", key="save_btn_t2"):
-            if not title_t2.strip() or not current_text.strip(): st.error("標題和內容 cannot be 空！")
+            if not title_t2.strip() or not current_text.strip(): st.error("標題和內容不能為空！")
             else:
                 with st.spinner("同步中..."):
                     if save_to_github(title_t2.strip(), current_text): st.success("成功同步至 GitHub 雲端！")
