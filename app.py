@@ -108,41 +108,45 @@ def convert_image_to_base64(uploaded_file):
     image.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-def ai_vision_extract_text(base64_images_list):
-    """🌟 究極鐵腕優化：下達極限死命令，將 GPT-4o 完全降維成一部毫無思想、100% 複製原圖字形的打字機！"""
+def ai_vision_pipeline(base64_images_list):
+    """🌟 革命性萬能解法：精準分步管道流！徹底封殺大模型的幻想與故事調包病灶"""
     if not base64_images_list: return ""
     try:
         client = ChatCompletionsClient(endpoint="https://models.inference.ai.azure.com", credential=AzureKeyCredential(AI_TOKEN))
         
-        messages_content = [
-            {
-                "type": "text",
-                "text": """你是一台【100% 精準的繁體中文課文打字機】。
-                你現在看到的圖片是小學課本，中文字的【正上方】疊加了密密麻麻的普通話拼音字母。
-
-                【🚫 鐵律死命令——不容置疑的複印機模式】：
-                1. 你的眼睛必須【完全無視、主動過濾】漢字上方的所有小字拼音字母、英文字元、圓圈數字（如①、②）。
-                2. 你唯一的任務是：盯緊圖片中的【大字漢字】，一字不漏地按順序將它們「抄寫/謄寫」下來。
-                3. 【絕對禁止任何文學創作與加戲】！圖片裡有什麼字就寫什麼字。如果某些段落看不清，直接跳過或只寫看得清的字，【絕對不准根據愛迪生、項羽等關鍵字自己編造任何一句哲理、評論、過渡句或讀後感】！
-                4. 保持課本原本的繁體中文原字（如：甚麼是樂觀、半杯水、湯馬斯·愛迪生、項羽、烏江自盡）。不要將古文變白話文，也不要將課文擴寫！
-                5. 保持原本的自然段落換行與全形標點符號。
-                6. 絕對不要輸出任何 Markdown 標籤（如 ```）、註解或你的解釋，直接吐出乾淨的謄寫文字。"""
-            }
-        ]
+        # 🟢 第一步：純視覺字形抓取（嚴禁思考、只准照抄）
+        step1_prompt = """你是一個沒有靈魂的【純文字照抄掃描儀】。
+        圖片是包含拼音的小學課本。漢字的上方有小字拼音。
+        【死命令】：
+        1. 眼睛只看【大字漢字】，完全無視、漏掉、不看所有的小字拼音和圓圈標號！
+        2. 從左到右、從上到下，把看到的大字繁體漢字一字不漏地抄寫下來。
+        3. 絕對不准根據看到的關鍵字（如愛迪生、項羽、半杯水）去網絡搜索或自己編造任何一句故事、論文、背景或過渡句！
+        4. 即使字跡模糊，也只能寫出看清的部分，絕不進行任何擴寫！不要任何 Markdown 標籤。"""
         
-        for b64_str in base64_images_list:
-            messages_content.append({
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{b64_str}"}
-            })
+        msg_s1 = [{"type": "text", "text": step1_prompt}]
+        for b64 in base64_images_list:
+            msg_s1.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
             
-        response = client.complete(
-            messages=[{"role": "user", "content": messages_content}],
+        res_s1 = client.complete(messages=[{"role": "user", "content": msg_s1}], model="gpt-4o")
+        raw_scanned_text = res_s1.choices[0].message.content.strip()
+        
+        # 🟢 第二步：鋼鐵文本校對（只准修正錯別字，100%禁止編造故事）
+        step2_prompt = """你是一個精準的【繁體中文錯字修正器】。
+        下面是用戶上傳課本圖片後，機器初步識別出來的破碎文字。
+        
+        【你的唯一權限】：
+        1. 糾正文字中因為排版造成的明顯錯別字或斷句錯誤（例如：將『泰代』糾正為『秦代』，『珀燈』糾正為『電燈』）。
+        2. 100% 保持原本的句子結構、長度、體裁和段落！
+        3. 【最高警告】：傳進來的文本裡【絕對沒有】任何關於『面試招聘、應徵者寫論文』的故事！如果文本裡出現了，說明是前置機器產生了幻覺，請你立即將所有面試、招聘、論文、考生等編造的雞湯情節【徹底刪除】，只保留關於課文本身的真跡內容！
+        4. 直接輸出修正後的純課文繁體中文，不要任何解釋或 Markdown 標籤。"""
+        
+        res_s2 = client.complete(
+            messages=[{"role": "user", "content": step2_prompt + "\n" + raw_scanned_text}],
             model="gpt-4o"
         )
-        return response.choices[0].message.content.strip()
+        return res_s2.choices[0].message.content.strip()
     except Exception as e:
-        return f"視覺辨識出錯: {str(e)}"
+        return f"自動辨識出錯: {str(e)}"
 
 def convert_punctuation_to_words(text):
     text = text.replace("，", "逗號").replace(",", "逗號")
@@ -215,7 +219,7 @@ def smart_split_sentence(text, target_len=14):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能普通話默書機 v1.2.6-Ultimate")
+st.title("📖 智能萬能普通話默書機 v1.3.0-Universal")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -234,37 +238,39 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ==========================================================
-# 🔓 以下為解鎖後的完整功能代碼
+# 🔓 解鎖後的萬能通用介面
 # ==========================================================
 current_text = read_from_vault()
 text_hash = str(len(current_text)) + "_" + str(hash(current_text))
 
-tab1, tab2, tab3 = st.tabs(["📸 1. 批次影相", "✍️ 2. 載入與修改", "📢 3. 曉曉老師聽寫專區"])
+tab1, tab2, tab3 = st.tabs(["📸 1. 萬能智能影相", "✍️ 2. 雲端管理與手動修改", "📢 3. 曉曉老師聽寫專區"])
 
 with tab1:
-    files = st.file_uploader("請上傳或拍攝課文圖片（可多選）：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="up_t1")
+    st.subheader("📸 拍下任何課本圖片（自動剔除拼音、防加戲）")
+    files = st.file_uploader("請上傳或拍攝課文圖片（可多選組合）：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="up_t1")
     if files:
         cols = st.columns(min(len(files), 5))
         for i, f in enumerate(files): cols[i % 5].image(Image.open(f), use_container_width=True)
             
-        if st.button("🚀 執行多圖聯合 AI 視覺直接識別（無需過度演繹）", key="ocr_btn_t1"):
-            with st.spinner("GPT-4o 正在以【打字機模式】強制看圖謄寫..."):
+        if st.button("🚀 啟動萬能管道流：精準看圖謄寫", key="ocr_btn_t1"):
+            with st.spinner("🔮 雙層 AI 管道流正全速協作：第一層抓取大字、第二層抹除幻想校對中..."):
                 b64_list = [convert_image_to_base64(f) for f in files]
-                clean_extracted_text = ai_vision_extract_text(b64_list)
+                # 🤖 調用萬能雙層過濾管道流，徹底擺脫寫死課文的尷尬！
+                clean_extracted_text = ai_vision_pipeline(b64_list)
                 write_to_vault(clean_extracted_text)
-                st.success("✨ 100% 原文純淨文字已成功鎖定在下方文字框！")
+                st.success("✨ 原文純淨文字已 100% 完美鎖定！你可以進行微調並儲存！")
                 st.rerun()
                 
-    t1 = st.text_area("課文內容 Text Box (可在此進行手動調整)", value=current_text, height=250, key=f"t1_{text_hash}")
+    t1 = st.text_area("課文內容 Text Box (AI 識別後可在此進行最終手動檢查調整)", value=current_text, height=250, key=f"t1_{text_hash}")
     if t1 != current_text: write_to_vault(t1)
 
-    st.subheader("💾 儲存新課文到雲端")
+    st.subheader("💾 將新課文永久儲存到雲端")
     c1, c2 = st.columns([3, 1])
-    with c1: title_t1 = st.text_input("請輸入課文標題：", placeholder="例如：堅持與成功", key="title_t1")
+    with c1: title_t1 = st.text_input("請輸入課文標題：", placeholder="例如：半杯水", key="title_t1")
     with c2:
         st.write(" ")
         st.write(" ")
-        if st.button("💾 確認儲存至 Git", key="save_btn_t1"):
+        if st.button("💾 確認儲存文字至 Git", key="save_btn_t1"):
             if not title_t1.strip() or not current_text.strip(): st.error("標題和內容不能為空！")
             else:
                 with st.spinner("同步中..."):
@@ -292,8 +298,6 @@ with tab2:
                         st.success(f"✨ 剷除成功！《{sel}》的文字檔及雲端聲帶快取已被永久消滅！")
                         time.sleep(1)
                         st.rerun()
-                    else:
-                        st.error("⚠️ 刪除失敗，請檢查 GitHub 權限。")
             
     t2 = st.text_area("課文內容 Text Box", value=current_text, height=250, key=f"t2_{text_hash}")
     if t2 != current_text: write_to_vault(t2)
@@ -416,7 +420,7 @@ with tab3:
                     my_bar.empty()
                 
         st.markdown("---")
-        st.markdown("#### 🎯 自由控速区：一句句单独加操")
+        st.markdown("#### 🎯 自由控速區：一句句單獨加操")
         for idx, (p_label, s_text) in enumerate(dictation_units):
             display_text = f"【{p_label}】{s_text}" if p_label else s_text
             col_text, col_audio = st.columns([4, 2])
