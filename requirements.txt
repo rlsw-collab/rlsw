@@ -1,0 +1,8 @@
+streamlit
+pytesseract
+pillow
+numpy
+azure-ai-inference
+azure-core
+edge-tts
+requests
