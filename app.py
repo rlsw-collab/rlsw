@@ -49,18 +49,20 @@ def save_to_github(title, content):
     put_res = requests.put(url, headers=headers, json=data)
     return put_res.status_code in [200, 201]
 
-def save_audio_to_github(title, audio_bytes):
-    url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.mp3"
+def save_audio_to_github(title, speed_label, audio_bytes):
+    clean_title = title.replace(".mp3", "")
+    url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{clean_title}_speed_{speed_label}.mp3"
     headers = {"Authorization": f"token {GIT_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     res = requests.get(url, headers=headers)
     content_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-    data = {"message": f"🎵 智能默書機：上傳課文聽寫軌 {title}.mp3", "content": content_b64, "branch": GH_BRANCH}
+    data = {"message": f"🎵 智能默書機：上傳課文聽寫軌 {clean_title} ({speed_label})", "content": content_b64, "branch": GH_BRANCH}
     if res.status_code == 200: data["sha"] = res.json()["sha"]
     put_res = requests.put(url, headers=headers, json=data)
     return put_res.status_code in [200, 201]
 
-def load_audio_from_github(title):
-    url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.mp3"
+def load_audio_from_github(title, speed_label):
+    clean_title = title.replace(".mp3", "")
+    url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{clean_title}_speed_{speed_label}.mp3"
     headers = {"Authorization": f"token {GIT_TOKEN}"}
     res = requests.get(url, headers=headers)
     if res.status_code == 200:
@@ -79,14 +81,14 @@ def delete_from_github(title):
     return False
 
 def delete_audio_from_github(title):
-    url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.mp3"
-    headers = {"Authorization": f"token {GIT_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons"
+    headers = {"Authorization": f"token {GIT_TOKEN}"}
     res = requests.get(url, headers=headers)
     if res.status_code == 200:
-        sha = res.json()["sha"]
-        data = {"message": f"💥 智能默書機：刪除聽寫軌 {title}.mp3", "sha": sha, "branch": GH_BRANCH}
-        del_res = requests.delete(url, headers=headers, json=data)
-        return del_res.status_code == 200
+        for f in res.json():
+            if f["name"].startswith(title) and f["name"].endswith(".mp3"):
+                del_url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{f['name']}"
+                requests.delete(del_url, headers=headers, json={"message": f"💥 刪除快取軌 {f['name']}", "sha": f["sha"], "branch": GH_BRANCH})
     return True
 
 def load_all_lessons():
@@ -130,11 +132,9 @@ def gemini_vision_extract(base64_images_list):
             
         payload = {"contents": [{"parts": parts}]}
         res = requests.post(url, headers=headers, json=payload)
-        
         if res.status_code == 200:
             return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-        else:
-            return f"Gemini API 報錯: {res.text}"
+        return f"Gemini API 報錯: {res.text}"
     except Exception as e:
         return f"Gemini 辨識發生異常: {str(e)}"
 
@@ -209,12 +209,15 @@ def smart_split_sentence(text, target_len=14):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能普通話默書機 v1.6.1-CacheFixed")
+st.title("📖 智能普通話默書機 v1.7.1-RealtimeFixed")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 if "current_lesson_title" not in st.session_state:
     st.session_state["current_lesson_title"] = ""
+# 🌟 用作存放「當前剛生成完、未被 GitHub 同步阻礙」的實時音軌記憶體
+if "instant_audio_bytes" not in st.session_state:
+    st.session_state["instant_audio_bytes"] = None
 
 if not st.session_state["authenticated"]:
     st.subheader("🔐 安全密碼驗證")
@@ -249,6 +252,7 @@ with tab1:
                 b64_list = [convert_image_to_base64(f) for f in files]
                 clean_extracted_text = gemini_vision_extract(b64_list)
                 write_to_vault(clean_extracted_text)
+                st.session_state["instant_audio_bytes"] = None # 清空舊音軌
                 st.success("✨ Gemini 完美原文已成功解鎖，請在下方查看！")
                 st.rerun()
                 
@@ -266,7 +270,8 @@ with tab1:
             else:
                 with st.spinner("同步中..."):
                     if save_to_github(title_t1.strip(), current_text): 
-                        st.session_state["current_lesson_title"] = title_t1.strip() # 鎖定當前課本名字
+                        st.session_state["current_lesson_title"] = title_t1.strip()
+                        st.session_state["instant_audio_bytes"] = None
                         st.success("成功同步至 GitHub 雲端！")
 
 with tab2:
@@ -278,7 +283,8 @@ with tab2:
         if st.button("📥 確認載入選取課文", key="load_btn_t2"):
             if sel != "-- 請選擇課文 --":
                 write_to_vault(load_single_lesson(sel))
-                st.session_state["current_lesson_title"] = sel # 鎖定當前課本名字
+                st.session_state["current_lesson_title"] = sel
+                st.session_state["instant_audio_bytes"] = None # 載入新課文時重置實時音軌
                 st.rerun()
                 
     with c_del:
@@ -290,6 +296,7 @@ with tab2:
                     if txt_ok:
                         write_to_vault("") 
                         st.session_state["current_lesson_title"] = ""
+                        st.session_state["instant_audio_bytes"] = None
                         st.success(f"✨ 剷除成功！《{sel}》的文字檔及雲端聲帶快取已被永久消滅！")
                         time.sleep(1)
                         st.rerun()
@@ -308,8 +315,10 @@ with tab2:
             with st.spinner("同步中..."):
                 if save_to_github(title_t2.strip(), current_text): 
                     st.session_state["current_lesson_title"] = title_t2.strip()
+                    st.session_state["instant_audio_bytes"] = None
                     st.success("成功同步至 GitHub 雲端！")
 
+# --- Tab 3: 聽寫專區 (🔥 漏洞全面物理封死修復版) ---
 with tab3:
     st.subheader("📢 曉曉老師聽寫默書專區")
     
@@ -318,16 +327,28 @@ with tab3:
     if st.button("📥 確認切換並載入聽寫課文", key="load_btn_t3"):
         if sel_t3 != "-- 請選擇課文 --":
             write_to_vault(load_single_lesson(sel_t3))
-            st.session_state["current_lesson_title"] = sel_t3 # 🟢 修正一：點擊確認載入聽寫課文，立刻強行同步全域狀態！
+            st.session_state["current_lesson_title"] = sel_t3 
+            st.session_state["instant_audio_bytes"] = None # 切換課文，清空之前的實時緩衝音軌
             st.rerun()
             
     st.markdown("---")
-    st.markdown("#### 📖 當前準備默書的課文內容：")
+    st.markdown("#### ⚙️ 曉曉老師發音參數調節面板")
+    speed_percent = st.slider(
+        "請調較曉曉老師的普通話語速：", 
+        min_value=-80, 
+        max_value=0, 
+        value=-60, 
+        step=5,
+        format="%d%%"
+    )
+    custom_rate_str = f"{speed_percent}%"
+    speed_label = f"rate_{speed_percent}" 
     
-    # 展示目前標題狀態
+    st.markdown("---")
+    st.markdown("#### 📖 當前準備默書的課文內容：")
     active_title = st.session_state["current_lesson_title"]
     if active_title:
-        st.markdown(f"**當前載入課文：** 🏆 `{active_title}`")
+        st.markdown(f"**當前載入課文：** 🏆 `{active_title}` (當前設定語速：`{custom_rate_str}`)" )
     
     if current_text.strip():
         st.markdown(
@@ -352,22 +373,30 @@ with tab3:
                     dictation_units.append((p_label, s_text))
         
         st.markdown("---")
-        st.markdown("#### 🚀 終極連播：全篇自動連續聽寫（-60%最慢、重覆間停4秒、寫字定格8秒）")
+        st.markdown(f"#### 🚀 終極連播：全篇自動連續聽寫（重複間停4秒、寫字定格8秒、當前語速 {custom_rate_str}）")
         
-        # 🟢 修正二：檢測快取不再使用不穩定的 sel_t3，而是直接使用實時鎖定嘅 active_title
+        # 🟢 核心邏輯升級：加入「實時剛生成音軌保險箱」優先權，徹底跳過 GitHub 後台同步延遲
         cached_audio = None
-        if active_title:
-            with st.spinner(f"🔍 正在連線 GitHub 讀取《{active_title}》的現成 MP3 聽寫軌..."):
-                cached_audio = load_audio_from_github(active_title)
         
-        if cached_audio:
-            st.success(f"⚡ 偵測到雲端已有《{active_title}》的完美快取音軌！一秒解鎖直接開播，無需重新等待生成！")
+        if st.session_state["instant_audio_bytes"] is not None:
+            # 優先使用剛剛熱辣辣出爐、存放在記憶體內的數據
+            cached_audio = st.session_state["instant_audio_bytes"]
+            st.success(f"🎉 曉曉老師已就位！整篇【{custom_rate_str}】連續聽寫音軌已完美合成，播放器即刻解鎖開播！")
             st.audio(cached_audio, format="audio/mp3")
-        else:
-            st.info("💡 雲端目前尚未有此課書的音軌快取。首次默書請點擊下方按鈕進行【全新生成與自動上傳備份】。")
+        elif active_title:
+            # 如果記憶體是空的，才連線去 GitHub 讀取雲端快取
+            with st.spinner(f"🔍 正在連線 GitHub 讀取《{active_title}》的【{custom_rate_str}】現成快取軌..."):
+                cached_audio = load_audio_from_github(active_title, speed_label)
+            if cached_audio:
+                st.success(f"⚡ 偵測到雲端已有《{active_title}》在 【{custom_rate_str}】 語速下的完美快取！直接秒播！")
+                st.audio(cached_audio, format="audio/mp3")
+                
+        # 如果記憶體同雲端都未有，就顯示全新生成按鈕
+        if cached_audio is None:
+            st.info(f"💡 這課書在 【{custom_rate_str}】 語速下目前尚未儲存快取。請點擊下方按鈕進行全新生成。")
             
             if st.button("🏁 一鍵產生【整篇連續默書】音軌", key="play_all_btn"):
-                progress_text = "曉曉老師正在全速封裝【物理防壓縮】最高規格聽寫音軌中，請稍候..."
+                progress_text = f"曉曉老師正在以【{custom_rate_str}】語速全速封裝最高規格聽寫軌中，請稍候..."
                 my_bar = st.progress(0, text=progress_text)
                 
                 loop = asyncio.new_event_loop()
@@ -382,7 +411,7 @@ with tab3:
                 
                 for idx, (p_label, s_text) in enumerate(dictation_units):
                     pct = int(((idx) / total_lines) * 100)
-                    my_bar.progress(pct, text=f"⏳ 正在合成第 {idx+1}/{total_lines} 句：{s_text[:10]}...")
+                    my_bar.progress(pct, text=f"⏳ 正在以 {custom_rate_str} 合成第 {idx+1}/{total_lines} 句...")
                     
                     text_with_breathes = convert_punctuation_to_words(s_text)
                     blocks = [b.strip() for b in re.split(r'(逗號|句號|感嘆號|問號|分號|冒號|頓號|開書名號|關書名號|開引號|關引號|破折號)', text_with_breathes) if b.strip()]
@@ -390,7 +419,7 @@ with tab3:
                     sentence_audio_stream = b""
                     for blk in blocks:
                         blk_clean = re.sub(r'[\s·\裝]', '', blk)
-                        blk_audio = loop.run_until_complete(generate_audio_clean_raw(blk_clean, custom_rate="-60%"))
+                        blk_audio = loop.run_until_complete(generate_audio_clean_raw(blk_clean, custom_rate=custom_rate_str))
                         if blk_audio:
                             sentence_audio_stream += blk_audio + silence_0_5s
                     
@@ -409,18 +438,17 @@ with tab3:
                     full_mp3 = b"".join(mp3_final_list)
                     my_bar.progress(100, text="🎉 音軌全面合成完畢！")
                     
-                    # 🟢 修正三：自動上傳也使用實時 active_title
-                    if active_title:
-                        with st.spinner(f"💾 正在自動將此完美音軌永久同步備份至 GitHub 為《{active_title}.mp3》..."):
-                            if save_audio_to_github(active_title, full_mp3):
-                                st.success(f"✨ 商業級優化成功！《{active_title}》的音軌已成功在 GitHub 備份存檔，下次打開立馬秒播！")
-                    else:
-                        # 備份防禦機制：如果真的沒標題，就用當前時間戳臨時命名存檔
-                        temp_title = f"未命名課文_{int(time.time())}"
-                        save_audio_to_github(temp_title, full_mp3)
+                    # 🟢 重點改進一：先塞進 Session State 實時記憶體內！100% 保證等陣重整播放器不會消失！
+                    st.session_state["instant_audio_bytes"] = full_mp3
                     
-                    st.audio(full_mp3, format="audio/mp3")
-                    st.rerun() # 重新刷新以立刻載入快取組件
+                    # 🟢 重點改進二：在後台慢慢傳上 GitHub，等它網絡延遲去，不干擾前台播放！
+                    if active_title:
+                        with st.spinner(f"💾 正在自動將完美音軌上傳為雲端 【{custom_rate_str}】 語速快取存檔..."):
+                            save_audio_to_github(active_title, speed_label, full_mp3)
+                    
+                    st.success("✨ 音軌已成功上傳雲端並同步鎖定至實時播放器！")
+                    time.sleep(1)
+                    st.rerun() # 重新刷新，立刻現身播放器！
                 else: 
                     st.error("⚠️ 音軌生成失敗。")
                     my_bar.empty()
@@ -447,7 +475,7 @@ with tab3:
                         sentence_audio_stream = b""
                         for blk in blocks:
                             blk_clean = re.sub(r'[\s·\裝]', '', blk)
-                            blk_audio = loop.run_until_complete(generate_audio_clean_raw(blk_clean, custom_rate="-60%"))
+                            blk_audio = loop.run_until_complete(generate_audio_clean_raw(blk_clean, custom_rate=custom_rate_str))
                             if blk_audio: sentence_audio_stream += blk_audio + silence_0_5s
                         
                         unit_stream = b""
