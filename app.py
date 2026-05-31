@@ -135,7 +135,7 @@ def smart_split_sentence(text, target_len=10):
 # ==========================================================
 # 🎨 Streamlit 前端網頁 UI 介面設計（手機/電腦自動適應）
 # ==========================================================
-st.set_page_config(page_title="智能雲端普通話默書機", page_icon="📖", layout="padded")
+st.set_page_config(page_title="智能雲端普通話默書機", page_icon="📖", layout="wide")
 
 st.title("📖 智能普通話默書機 (雲端網頁版)")
 st.caption("📱 支援手機瀏覽器影相、修改課文及微軟曉曉高清讀默同步音軌")
