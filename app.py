@@ -104,17 +104,19 @@ def load_single_lesson(title):
     return base64.b64decode(res.json()["content"]).decode("utf-8") if res.status_code == 200 else ""
 
 def ai_correct_text(bad_text):
+    """🌟 終極重磅更新：極限鎖定原文字形，禁止任何白話文翻譯、意譯與改寫！"""
     try:
         client = ChatCompletionsClient(endpoint="https://models.inference.ai.azure.com", credential=AzureKeyCredential(AI_TOKEN))
-        prompt = """
-        你是一個專門修復小學課文 OCR 錯誤的頂級專家。
-        傳進來的文本可能夾雜了大量的普通話拼音和殘缺錯字。
+        prompt = """你是一個專門修復小學課文 OCR 錯誤的頂級嚴格專家。
+        傳進來的文本可能夾雜了大量的拼音、英文字母、數字（如①、②）和無意義亂碼。
+
+        【🔥 鐵獸級硬性任務——違者扣分】：
+        1. 保持原文的「體裁」與「字詞」絕對不變！如果原文是古文（文言文），必須 100% 輸出古文，絕對禁止將古文翻譯成白話文！
+        2. 徹底剔除所有拼音、英文字母及無意義的圓圈數字標號（例如刪除 ①、②、③ 等）。
+        3. 根據 OCR 殘缺字進行字形修正，輸出 100% 精準的【繁體中文課文原文】。
+        4. 嚴格做到「不新增任何課文沒有的句子、不重組段落、不作任何意譯與演繹」。
+        5. 絕對不要包含任何 Markdown 語法標籤、註解或你的額外解釋，直接輸出修復後的純淨課文。"""
         
-        【你的核心任務】：
-        1. 徹底刪除文本中所有的拼音、英文字母及無意義雜質號。
-        2. 根據上下文，將中文字 100% 還原成精準、通順、符合小學課本邏輯的【繁體中文課文原文】。
-        3. 絕對不要包含任何拼音、Markdown 語法標籤、註解或你的額外解釋，直接輸出修復後的純課文。
-        """
         response = client.complete(messages=[{"role": "user", "content": prompt + "\n" + bad_text}], model="gpt-4o")
         return response.choices[0].message.content.strip()
     except: return bad_text
@@ -169,7 +171,7 @@ def smart_split_sentence(text, target_len=14):
             current_char_count += 1
             
         if char in strong_ends or (current_char_count >= target_len and char in split_chars):
-            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」").replace("【感引】", "！」")
+            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "結構。」").replace("【感引】", "！」")
             if chunk_restore.strip(): sub_sentences.append(chunk_restore.strip())
             current_chunk = ""
             current_char_count = 0
@@ -190,7 +192,7 @@ def smart_split_sentence(text, target_len=14):
 # 🎨 UI 介面佈局
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能普通話默書機 v1.2.2-Final")
+st.title("📖 智能普通話默書機 v1.2.3-Final")
 
 current_text = read_from_vault()
 text_hash = str(len(current_text)) + "_" + str(hash(current_text))
@@ -240,7 +242,6 @@ with tab2:
     with c_del:
         if sel != "-- 請選擇課文 --":
             if st.button("🗑️ 徹底刪除雲端課文及音軌快取", key="del_btn_t2", type="primary"):
-                # 🟢 修正：完美將大階 St 變回細階 st，絕不再拋 NameError 
                 with st.spinner(f"💥 正在從雲端徹底剷除《{sel}》的文字與 MP3 檔..."):
                     txt_ok = delete_from_github(sel)
                     mp3_ok = delete_audio_from_github(sel)
