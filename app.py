@@ -12,7 +12,7 @@ import edge_tts
 import asyncio
 
 # ==========================================================
-# ⚙️ 設定區 (已徹底廢除 pytesseract，無需再設定 exe 路徑)
+# ⚙️ 設定區
 # ==========================================================
 AI_TOKEN = st.secrets["AI_TOKEN"] if "AI_TOKEN" in st.secrets else ""
 GIT_TOKEN = st.secrets["GIT_TOKEN"] if "GIT_TOKEN" in st.secrets else ""
@@ -101,7 +101,6 @@ def load_single_lesson(title):
     return base64.b64decode(res.json()["content"]).decode("utf-8") if res.status_code == 200 else ""
 
 def convert_image_to_base64(uploaded_file):
-    """將上傳的圖片轉成 Base64 數據流，方便直餵 GPT 視覺模型"""
     image = Image.open(uploaded_file)
     if image.mode != "RGB":
         image = image.convert("RGB")
@@ -110,29 +109,27 @@ def convert_image_to_base64(uploaded_file):
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
 def ai_vision_extract_text(base64_images_list):
-    """🌟 革命性更新：利用 GPT-4o 視覺多模態能力，看圖逐字謄寫，徹底拔除『自作聰明加戲』的劣根性！"""
+    """🌟 究極鐵腕優化：下達極限死命令，將 GPT-4o 完全降維成一部毫無思想、100% 複製原圖字形的打字機！"""
     if not base64_images_list: return ""
     try:
         client = ChatCompletionsClient(endpoint="https://models.inference.ai.azure.com", credential=AzureKeyCredential(AI_TOKEN))
         
-        # 建立視覺流專屬的鋼鐵死命令 Prompt
         messages_content = [
             {
                 "type": "text",
-                "text": """你是一個極度嚴格、只會按圖謄寫的文字記錄員。
-                你現在看到的圖片是小學課本。圖片中包含漢字、拼音、干擾圓圈數字（如①、②）。
+                "text": """你是一台【100% 精準的繁體中文課文打字機】。
+                你現在看到的圖片是小學課本，中文字的【正上方】疊加了密密麻麻的普通話拼音字母。
 
-                【🔥 鋼鐵律令——違者徹底扣分罷工】：
-                1. 只能「逐字謄寫」你在圖片中親眼看到的繁體中文字。
-                2. 絕對禁止將古文（文言文）意譯或改寫成白話文！圖片是文言文就必須輸出文言文！
-                3. 絕對禁止根據課文主題自己編造、續寫、或添加任何原圖沒有的總結與評論！
-                4. 徹底過濾並刪除所有的普通話拼音字元、英文字母、以及小圓圈數字標號（如 ①、②、③）。
-                5. 保持課本原本的自然段落順序與全形標點符號。
-                6. 絕對不要輸出任何 Markdown 標籤（如 ```）、註解或你的解釋，直接吐出純淨課文。"""
+                【🚫 鐵律死命令——不容置疑的複印機模式】：
+                1. 你的眼睛必須【完全無視、主動過濾】漢字上方的所有小字拼音字母、英文字元、圓圈數字（如①、②）。
+                2. 你唯一的任務是：盯緊圖片中的【大字漢字】，一字不漏地按順序將它們「抄寫/謄寫」下來。
+                3. 【絕對禁止任何文學創作與加戲】！圖片裡有什麼字就寫什麼字。如果某些段落看不清，直接跳過或只寫看得清的字，【絕對不准根據愛迪生、項羽等關鍵字自己編造任何一句哲理、評論、過渡句或讀後感】！
+                4. 保持課本原本的繁體中文原字（如：甚麼是樂觀、半杯水、湯馬斯·愛迪生、項羽、烏江自盡）。不要將古文變白話文，也不要將課文擴寫！
+                5. 保持原本的自然段落換行與全形標點符號。
+                6. 絕對不要輸出任何 Markdown 標籤（如 ```）、註解或你的解釋，直接吐出乾淨的謄寫文字。"""
             }
         ]
         
-        # 將多張圖片以 Base64 格式打包進去，實現多圖聯合辨識
         for b64_str in base64_images_list:
             messages_content.append({
                 "type": "image_url",
@@ -208,7 +205,7 @@ def smart_split_sentence(text, target_len=14):
         
     final_sentences = []
     for s in sub_sentences:
-        if final_sentences and s[0] in ['，', '、', '。', '！', '？', '；', '：', '」', '開引號', '》', '』', '”']:
+        if final_sentences and s[0] in ['，', '、', '。', '！', '？', '；', '：', '」', '》', '』', '”']:
             final_sentences[-1] = final_sentences[-1] + s
         else:
             final_sentences.append(s)
@@ -218,7 +215,7 @@ def smart_split_sentence(text, target_len=14):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能普通話默書機 v1.2.5-Ultimate")
+st.title("📖 智能普通話默書機 v1.2.6-Ultimate")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -251,8 +248,7 @@ with tab1:
         for i, f in enumerate(files): cols[i % 5].image(Image.open(f), use_container_width=True)
             
         if st.button("🚀 執行多圖聯合 AI 視覺直接識別（無需過度演繹）", key="ocr_btn_t1"):
-            with st.spinner("GPT-4o 視覺多模態正在精準看圖謄寫課文..."):
-                # 🟢 核心改變：直接將圖片轉 Base64 餵給 GPT-4o 視覺模型，跳過爛碼 OCR 階段！
+            with st.spinner("GPT-4o 正在以【打字機模式】強制看圖謄寫..."):
                 b64_list = [convert_image_to_base64(f) for f in files]
                 clean_extracted_text = ai_vision_extract_text(b64_list)
                 write_to_vault(clean_extracted_text)
@@ -420,7 +416,7 @@ with tab3:
                     my_bar.empty()
                 
         st.markdown("---")
-        st.markdown("#### 🎯 自由控速區：一句句單獨加操")
+        st.markdown("#### 🎯 自由控速区：一句句单独加操")
         for idx, (p_label, s_text) in enumerate(dictation_units):
             display_text = f"【{p_label}】{s_text}" if p_label else s_text
             col_text, col_audio = st.columns([4, 2])
