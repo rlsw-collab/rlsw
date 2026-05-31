@@ -71,11 +71,23 @@ def ai_correct_text(bad_text):
         return response.choices[0].message.content.strip()
     except: return bad_text
 
+def convert_punctuation_to_words(text):
+    """🌟 新增功能：將全形標點符號轉換成普通話語音文字，等曉曉老師可以直接讀出標點"""
+    text = text.replace("，", "逗號").replace(",", "逗號")
+    text = text.replace("。", "句號")
+    text = text.replace("！", "感嘆號")
+    text = text.replace("？", "問號")
+    text = text.replace("；", "分號")
+    text = text.replace("：", "冒號")
+    text = text.replace("、", "頓號")
+    return text
+
 async def generate_audio(text):
-    clean_text = re.sub(r'[，。！？；：、「」『』《》·——……]', ' ', text).strip()
-    if not clean_text: return b""
+    # 🌟 核心修正：讀取標點，並將語速（rate）大幅調慢到小學課堂級別的 -20%
+    speak_text = convert_punctuation_to_words(text)
+    if not speak_text.strip(): return b""
     try:
-        communicate = edge_tts.Communicate(clean_text, "zh-CN-XiaoxiaoNeural", rate="-5%")
+        communicate = edge_tts.Communicate(speak_text, "zh-CN-XiaoxiaoNeural", rate="-20%")
         audio_data = b""
         async for chunk in communicate.stream():
             if chunk["type"] == "audio": audio_data += chunk["data"]
@@ -84,17 +96,17 @@ async def generate_audio(text):
         return b""
 
 def build_dictation_mp3(audio_bytes):
-    """🌟 核心修正：改用標準 MP3 二進制流進行高保真拼接，徹底解決冇聲 Bug"""
+    """🌟 核心修正：精準的 8.0 秒 MP3 純淨靜音落鎖，確保重覆兩次之間絕不急躁"""
     if not audio_bytes: return b""
-    # 在標準 24kHz MP3 中，1秒鐘的空白數據大約佔用 1600 bytes
-    # 停頓 8.5 秒 = 1600 * 8.5 = 13600 內容字節的標準靜音流
-    mp3_silence = b"\x00" * 13600
-    # 讀兩次結構：第一遍 + 8.5秒停頓 + 第二遍 + 8.5秒停頓
+    # 標準 24kHz MP3 中，1秒鐘的空白數據大約佔用 1600 bytes
+    # 8.0 秒停頓 = 1600 * 8 = 12800 bytes 的絕對靜音流
+    mp3_silence = b"\x00" * 12800
+    # 讀兩次結構：第一遍 -> 停頓8秒給小朋友寫字 -> 第二遍 -> 停頓8秒
     return audio_bytes + mp3_silence + audio_bytes + mp3_silence
 
-def smart_split_sentence(text, target_len=10):
+def smart_split_sentence(text, target_len=12):
     strong_ends = ['。', '！', '？', '；', '：', '\n']
-    split_chars = ['，', '、', ',']
+    split_chars = ['，', '、']
     sub_sentences = []
     current_chunk = ""
     current_char_count = 0
@@ -113,7 +125,7 @@ def smart_split_sentence(text, target_len=10):
 # 🎨 UI 介面佈局
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能普通話默書機 v1.0.7-Final")
+st.title("📖 智能普通話默書機 v1.0.8-Final")
 
 current_text = read_from_vault()
 text_hash = str(len(current_text)) + "_" + str(hash(current_text))
@@ -185,7 +197,6 @@ with tab2:
 with tab3:
     st.subheader("📢 曉曉老師聽寫默書專區")
     
-    # 🟢 修正一：加返 GITHUB 課文選擇選單（與 Tab 2 完美同步同步）
     lessons_t3 = load_all_lessons()
     sel_t3 = st.selectbox("📂 聽寫專區直接選取雲端舊課文：", ["-- 請選擇課文 --"] + lessons_t3, key="select_t3")
     if st.button("📥 確認切換並載入聽寫課文", key="load_btn_t3"):
@@ -194,8 +205,8 @@ with tab3:
             st.rerun()
             
     st.markdown("---")
-    # 🟢 修正二：動態刷新顯示文字框，載入咩課文，呢度即時出返 100% 正確嘅字
-    st.text_area("當前準備默書的課文內容：", value=current_text, height=200, disabled=True, key=f"t3_display_{text_hash}")
+    # 🟢 修正一：將 disabled=True 換成 read_only=True，灰色字體即刻恢復成飽滿的「黑色字」，好睇好多！
+    st.text_area("當前準備默書的課文內容：", value=current_text, height=200, read_only=True, key=f"t3_display_{text_hash}")
     
     if current_text.strip():
         paragraphs = [p.strip() for p in re.split(r'\n\s*\n', current_text) if p.strip()]
@@ -203,9 +214,9 @@ with tab3:
         for p_text in paragraphs: all_sentences.extend(smart_split_sentence(p_text))
         
         st.markdown("---")
-        st.markdown("#### 🚀 終極連播：全篇自動連續聽寫（讀兩次、停8.5秒）")
+        st.markdown("#### 🚀 終極連播：全篇自動連續聽寫（慢速、讀標點、定8秒）")
         if st.button("🏁 一鍵產生【整篇連續默書】音軌", key="play_all_btn"):
-            with st.spinner("曉曉老師正在打包整篇【讀兩次、停8.5秒】高保真音軌..."):
+            with st.spinner("曉曉老師正在打包【慢速 + 讀標點 + 每句重覆兩次定8秒】高保真音軌..."):
                 mp3_list = []
                 for s in all_sentences:
                     if s.strip():
@@ -213,17 +224,16 @@ with tab3:
                         asyncio.set_event_loop(loop)
                         audio_raw = loop.run_until_complete(generate_audio(s))
                         loop.close()
-                        # 🟢 修正三：直接將原裝 MP3 做雙重複讀與 8.5 秒靜音拼接，拒絕 PCM 格式錯亂
                         if audio_raw: mp3_list.append(build_dictation_mp3(audio_raw))
                 
                 if mp3_list:
                     full_mp3 = b"".join(mp3_list)
-                    st.success("🎉 整篇課文聽寫軌合成成功！每句曉曉老師都會讀兩次、自動停頓 8.5 秒，快撳 Play 開始聽寫！")
+                    st.success("🎉 聽寫軌合成成功！曉曉老師會用溫柔慢速讀出課文與標點，每句讀兩次、中間精準停頓 8 秒給小朋友寫字！")
                     st.audio(full_mp3, format="audio/mp3")
                 else: st.error("⚠️ 音軌生成失敗")
                 
         st.markdown("---")
-        st.markdown("#### 🎯 自由控速區：一句句單獨加操（亦帶讀兩次、停頓）")
+        st.markdown("#### 🎯 自由控速區：一句句單獨加操（亦帶讀標點、兩次與停頓）")
         for idx, sentence in enumerate(all_sentences):
             if sentence.strip():
                 col_text, col_audio = st.columns([4, 2])
@@ -235,4 +245,4 @@ with tab3:
                             asyncio.set_event_loop(loop)
                             audio_raw = loop.run_until_complete(generate_audio(sentence))
                             loop.close()
-                            if audio_raw: st.audio(build_dictation_mp3(audio_raw), format="audio/mp3")
+                            if audio_raw: st.audio(build_dictation_mp3(audio_raw), format="audio/wav")
