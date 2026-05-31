@@ -128,7 +128,7 @@ def ai_correct_text_strict(bad_text):
     if not AI_TOKEN: return bad_text
     try:
         client = ChatCompletionsClient(endpoint="https://models.inference.ai.azure.com", credential=AzureKeyCredential(AI_TOKEN))
-        prompt = """你是一個專門修復小學課文 OCR 錯誤的頂級專家。請將文本中所有的普通話拼音和英文字母徹底刪除，將中文字 100% 還原成精準、通順、符合小學課本邏輯的【繁體中文課文原文】。絕對不要包含任何拼音、Markdown 語法標籤、註解或額外解釋，直接輸出修復後的純課文。"""
+        prompt = """你是一個專門修復小學課文 OCR 錯誤的頂級專家。請將文本中所有的普通話拼音和英文字母徹底刪除，將中文字 100% 還原成精準、通順、符合小學課本邏輯的【繁體中文課文原文】。絕對不要包含 any 拼音、Markdown 語法標籤、註解或額外解釋，直接輸出修復後的純課文。"""
         response = client.complete(messages=[{"role": "user", "content": prompt + "\n文本:\n" + bad_text}], model="gpt-4o")
         return response.choices[0].message.content.strip()
     except:
@@ -200,13 +200,22 @@ def smart_split_sentence(text, target_len=10):
     return sub_sentences
 
 # ==========================================================
-# 🎨 介面啟動與分流標籤
+# 🎨 介面啟動與大標題版本號
 # ==========================================================
 st.set_page_config(page_title="智能雲端普通話默書機", page_icon="📖", layout="wide")
-st.title("📖 智能普通話默書機 (多用戶安全隔離完全體)")
+st.title("📖 智能普通話默書機 (多用戶安全隔離完全體) v1.0.4-Failsafe")
 
 # 讀取現有實體暫存
 current_vault_text = read_from_vault()
+text_hash = str(len(current_vault_text)) + "_" + str(hash(current_vault_text))
+
+# 📡 重新裝回：DEBUG 雷達快照
+with st.expander("🔍 實時保險箱核心快照 (DEBUG 雷達)", expanded=True):
+    if current_vault_text:
+        st.success(f"⚡ 後台實實安全暫存檔目前鎖定： **{len(current_vault_text)}** 字")
+        st.info(current_vault_text)
+    else:
+        st.warning("⚠️ 後台實時暫存目前為空。")
 
 tab1, tab2, tab3 = st.tabs([
     "📸 1. 批次影相 / 多圖上傳功能", 
@@ -231,14 +240,13 @@ with tab1:
                     raw = pytesseract.image_to_string(img, config=r'-l chi_tra+chi_sim --psm 3')
                     full_raw_text += f"\n{raw}\n"
                 
-                # 🤖 唯一直讀寫入實體暫存，代碼中 100% 絕不手動觸摸 st.session_state["t1_field"]
                 ai_out = ai_correct_text_strict(full_raw_text)
                 write_to_vault(ai_out)
                 st.success("✨ 文字已成功寫入底層保險箱！")
                 st.rerun()
 
-    # 顯示時使用老實的 value= 載入，手動打字修改時即時寫回檔案
-    t1_input = st.text_area("課文內容 Text Box (可在此進行手動調整)", value=current_vault_text, height=250, key="t1_widget")
+    # 🔥 核心降維打擊：利用動態 key=text_hash，當文字有變動時，強制 Streamlit 銷毀並重新生成全新文字框，徹底消滅空白 Bug
+    t1_input = st.text_area("課文內容 Text Box (可在此進行手動調整)", value=current_vault_text, height=250, key=f"t1_widget_{text_hash}")
     if t1_input != current_vault_text:
         write_to_vault(t1_input)
 
@@ -259,7 +267,7 @@ with tab1:
                     st.success(msg) if success else st.error(msg)
 
 # ==========================================================
-# 功能二：手動輸入 / 課文修改功能（🔥 徹底拔除 280 行髒代碼）
+# 功能二：手動輸入 / 課文修改功能
 # ==========================================================
 with tab2:
     st.subheader("✍️ 載入、修改與編寫課文")
@@ -272,7 +280,6 @@ with tab2:
             selected_lesson = st.selectbox("📂 選取雲端舊課文：", ["-- 請選擇課文 --"] + all_lessons, key="select_t2")
             if selected_lesson != "-- 請選擇課文 --" and st.button("📥 確認載入選取課文", key="load_btn_t2"):
                 loaded_text = load_single_lesson(selected_lesson)
-                # 🤖 核心修正：只寫實體暫存檔！絕不手動觸碰任何 st.session_state 唯讀元件變數
                 write_to_vault(loaded_text)
                 st.success(f"已成功載入: {selected_lesson}")
                 st.rerun()
@@ -293,8 +300,8 @@ with tab2:
     else:
         st.info("雲端目前沒有已儲存的課文檔。")
 
-    # 顯示時使用老實的 value= 載入，手動打字修改時即時寫回檔案
-    t2_input = st.text_area("課文內容 Text Box", value=current_vault_text, height=250, key="t2_widget")
+    # 🔥 同步強刷機制
+    t2_input = st.text_area("課文內容 Text Box", value=current_vault_text, height=250, key=f"t2_widget_{text_hash}")
     if t2_input != current_vault_text:
         write_to_vault(t2_input)
 
