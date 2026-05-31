@@ -183,27 +183,34 @@ def build_full_lesson_wav(pcm_list, sample_rate=24000):
     return header + full_pcm
 
 def smart_split_sentence(text, target_len=10):
-    strong_ends = ['。', '！', '？', '——', '……']
-    split_chars = ['，', '、', '；', '：']
+    # 將所有常見的繁網全形標點統統納入切割雷達，確保每句長度適中，微軟引擎絕對不罷工
+    strong_ends = ['。', '！', '？', '；', '：', '\n']
+    split_chars = ['，', '、', ',']
     sub_sentences = []
     current_chunk = ""
     current_char_count = 0
+    
     for char in text:
         current_chunk += char
-        if char not in (strong_ends + split_chars + ['「', '」', '《', '裝', '“', '”', '·']):
+        if char not in (strong_ends + split_chars + ['「', '」', '《', '》', '“', '”', '·']):
             current_char_count += 1
+            
+        # 只要遇到強句尾，或者字數夠長遇到逗號，就立刻切斷成獨立短句
         if char in strong_ends or (current_char_count >= target_len and char in split_chars):
-            if current_chunk.strip(): sub_sentences.append(current_chunk.strip())
+            if current_chunk.strip():
+                sub_sentences.append(current_chunk.strip())
             current_chunk = ""
             current_char_count = 0
-    if current_chunk.strip(): sub_sentences.append(current_chunk.strip())
+            
+    if current_chunk.strip():
+        sub_sentences.append(current_chunk.strip())
     return sub_sentences
 
 # ==========================================================
 # 🎨 介面啟動與大標題版本號
 # ==========================================================
 st.set_page_config(page_title="智能雲端普通話默書機", page_icon="📖", layout="wide")
-st.title("📖 智能普通話默書機 (多用戶安全隔離完全體) v1.0.4-Failsafe")
+st.title("📖 智能普通話默書機　v1.0.５")
 
 # 讀取現有實體暫存
 current_vault_text = read_from_vault()
