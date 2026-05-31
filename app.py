@@ -70,7 +70,6 @@ def load_audio_from_github(title):
         return base64.b64decode(res.json()["content"])
     return None
 
-# 🟢 新增功能：從 GitHub 物理刪除課文文字檔
 def delete_from_github(title):
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.txt"
     headers = {"Authorization": f"token {GIT_TOKEN}", "Accept": "application/vnd.github.v3+json"}
@@ -82,7 +81,6 @@ def delete_from_github(title):
         return del_res.status_code == 200
     return False
 
-# 🟢 新增功能：從 GitHub 物理刪除雲端快取音軌
 def delete_audio_from_github(title):
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.mp3"
     headers = {"Authorization": f"token {GIT_TOKEN}", "Accept": "application/vnd.github.v3+json"}
@@ -92,7 +90,7 @@ def delete_audio_from_github(title):
         data = {"message": f"💥 智能默書機：刪除聽寫軌 {title}.mp3", "sha": sha, "branch": GH_BRANCH}
         del_res = requests.delete(url, headers=headers, json=data)
         return del_res.status_code == 200
-    return True # 如果本身就冇音軌快取，當作刪除成功
+    return True
 
 def load_all_lessons():
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons"
@@ -184,7 +182,7 @@ def smart_split_sentence(text, target_len=14):
 # 🎨 UI 介面佈局
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能普通話默書機 v1.2.1-Final")
+st.title("📖 智能普通話默書機 v1.2.2-Final")
 
 current_text = read_from_vault()
 text_hash = str(len(current_text)) + "_" + str(hash(current_text))
@@ -220,7 +218,6 @@ with tab1:
                 with st.spinner("同步中..."):
                     if save_to_github(title_t1.strip(), current_text): st.success("成功同步至 GitHub 雲端！")
 
-# --- Tab 2: 載入與修改 (新增：文音雙刪功能) ---
 with tab2:
     lessons = load_all_lessons()
     sel = st.selectbox("📂 選取雲端舊課文：", ["-- 請選擇課文 --"] + lessons, key="select_t2")
@@ -232,16 +229,15 @@ with tab2:
                 write_to_vault(load_single_lesson(sel))
                 st.rerun()
                 
-    # 🟢 修正：完美加入「文音雙刪」安全按鈕
     with c_del:
         if sel != "-- 請選擇課文 --":
             if st.button("🗑️ 徹底刪除雲端課文及音軌快取", key="del_btn_t2", type="primary"):
-                with St.spinner(f"💥 正在從雲端徹底剷除《{sel}》的文字與 MP3 檔..."):
-                    # 同步刪除文字與音軌
+                # 🟢 修正：完美將大階 St 變回細階 st，絕不再拋 NameError 
+                with st.spinner(f"💥 正在從雲端徹底剷除《{sel}》的文字與 MP3 檔..."):
                     txt_ok = delete_from_github(sel)
                     mp3_ok = delete_audio_from_github(sel)
                     if txt_ok:
-                        write_to_vault("") # 清空當前保險箱
+                        write_to_vault("") 
                         st.success(f"✨ 剷除成功！《{sel}》的文字檔及雲端聲帶快取已被永久消滅！")
                         time.sleep(1)
                         st.rerun()
