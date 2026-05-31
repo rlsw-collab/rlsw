@@ -72,7 +72,7 @@ def ai_correct_text(bad_text):
     except: return bad_text
 
 def convert_punctuation_to_words(text):
-    """🌟 新增功能：將全形標點符號轉換成普通話語音文字，等曉曉老師可以直接讀出標點"""
+    """將全形標點符號轉換成普通話語音文字，等曉曉老師可以直接讀出標點"""
     text = text.replace("，", "逗號").replace(",", "逗號")
     text = text.replace("。", "句號")
     text = text.replace("！", "感嘆號")
@@ -83,10 +83,10 @@ def convert_punctuation_to_words(text):
     return text
 
 async def generate_audio(text):
-    # 🌟 核心修正：讀取標點，並將語速（rate）大幅調慢到小學課堂級別的 -20%
     speak_text = convert_punctuation_to_words(text)
     if not speak_text.strip(): return b""
     try:
+        # 語速（rate）調慢到最舒適的小學教學級別 -20%
         communicate = edge_tts.Communicate(speak_text, "zh-CN-XiaoxiaoNeural", rate="-20%")
         audio_data = b""
         async for chunk in communicate.stream():
@@ -96,12 +96,12 @@ async def generate_audio(text):
         return b""
 
 def build_dictation_mp3(audio_bytes):
-    """🌟 核心修正：精準的 8.0 秒 MP3 純淨靜音落鎖，確保重覆兩次之間絕不急躁"""
+    """精準的 8.0 秒 MP3 純淨靜音落鎖，確保重覆兩次之間能空出 8 秒給小朋友寫字"""
     if not audio_bytes: return b""
     # 標準 24kHz MP3 中，1秒鐘的空白數據大約佔用 1600 bytes
     # 8.0 秒停頓 = 1600 * 8 = 12800 bytes 的絕對靜音流
     mp3_silence = b"\x00" * 12800
-    # 讀兩次結構：第一遍 -> 停頓8秒給小朋友寫字 -> 第二遍 -> 停頓8秒
+    # 讀兩次結構：第一遍 -> 停頓8秒寫字 -> 第二遍 -> 停頓8秒
     return audio_bytes + mp3_silence + audio_bytes + mp3_silence
 
 def smart_split_sentence(text, target_len=12):
@@ -125,7 +125,7 @@ def smart_split_sentence(text, target_len=12):
 # 🎨 UI 介面佈局
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能普通話默書機 v1.0.8-Final")
+st.title("📖 智能普通話默書機 v1.0.9-Final")
 
 current_text = read_from_vault()
 text_hash = str(len(current_text)) + "_" + str(hash(current_text))
@@ -205,8 +205,21 @@ with tab3:
             st.rerun()
             
     st.markdown("---")
-    # 🟢 修正一：將 disabled=True 換成 read_only=True，灰色字體即刻恢復成飽滿的「黑色字」，好睇好多！
-    st.text_area("當前準備默書的課文內容：", value=current_text, height=200, read_only=True, key=f"t3_display_{text_hash}")
+    st.markdown("#### 📖 當前準備默書的課文內容：")
+    
+    # 🟢 終極優化修正：拋棄不可靠的 st.text_area 唯讀機制，改用 HTML 渲染大黑字區塊，100% 顯眼黑色、100% 穩健！
+    if current_text.strip():
+        # 用一個漂亮的白色底框、黑色粗體字來裝載課文，對齊極之舒服
+        st.markdown(
+            f"""
+            <div style="background-color: white; padding: 15px; border-radius: 5px; border: 1px solid #ddd; color: black; font-size: 16px; line-height: 1.6; white-space: pre-wrap; font-weight: 500;">
+            {current_text}
+            </div>
+            """, 
+            unsafe_allow_html=True
+        )
+    else:
+        st.info("目前保險箱內沒有課文數據，請先去 Tab 1 影相或 Tab 2 載入課文。")
     
     if current_text.strip():
         paragraphs = [p.strip() for p in re.split(r'\n\s*\n', current_text) if p.strip()]
@@ -245,4 +258,4 @@ with tab3:
                             asyncio.set_event_loop(loop)
                             audio_raw = loop.run_until_complete(generate_audio(sentence))
                             loop.close()
-                            if audio_raw: st.audio(build_dictation_mp3(audio_raw), format="audio/wav")
+                            if audio_raw: st.audio(build_dictation_mp3(audio_raw), format="audio/mp3")
