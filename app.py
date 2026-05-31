@@ -38,7 +38,7 @@ def read_from_vault():
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================================
-# 🧠 核心功能函數 (隆重引入 Gemini 視覺神經中樞)
+# 🧠 核心功能函數 
 # ==========================================================
 def save_to_github(title, content):
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.txt"
@@ -109,15 +109,12 @@ def convert_image_to_base64(uploaded_file):
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
 def gemini_vision_extract(base64_images_list):
-    """🤖 真正切換至 Gemini 2.5/Flash 視覺大腦：具備極強的繁體字及抗拼音干擾能力！"""
     if not base64_images_list: return ""
     if not GEMINI_TOKEN: return "錯誤：未在 Secrets 中設定 GEMINI_TOKEN！"
     try:
-        # 使用 Google 官方原生 Gemini REST API，無需額外裝大依賴，部署極速穩定
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
         headers = {"Content-Type": "application/json"}
         
-        # 建立專屬 Gemini 的鋼鐵謄寫指令
         prompt_text = """你現在是一個100%精準、只會看圖抄寫的繁體中文打字掃描儀。
         你看到的圖片是小學課本。漢字的正上方疊加了密密麻麻的普通話拼音。
 
@@ -129,12 +126,7 @@ def gemini_vision_extract(base64_images_list):
 
         parts = [{"text": prompt_text}]
         for b64 in base64_images_list:
-            parts.append({
-                "inline_data": {
-                    "mime_type": "image/jpeg",
-                    "data": b64
-                }
-            })
+            parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
             
         payload = {"contents": [{"parts": parts}]}
         res = requests.post(url, headers=headers, json=payload)
@@ -217,10 +209,12 @@ def smart_split_sentence(text, target_len=14):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能普通話默書機 v1.6.0-GeminiPowered")
+st.title("📖 智能普通話默書機 v1.6.1-CacheFixed")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
+if "current_lesson_title" not in st.session_state:
+    st.session_state["current_lesson_title"] = ""
 
 if not st.session_state["authenticated"]:
     st.subheader("🔐 安全密碼驗證")
@@ -236,7 +230,7 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ==========================================================
-# 🔓 解鎖後的完整介面 (由 Gemini 大腦強勢驅動 OCR)
+# 🔓 解鎖後的完整介面
 # ==========================================================
 current_text = read_from_vault()
 text_hash = str(len(current_text)) + "_" + str(hash(current_text))
@@ -253,7 +247,6 @@ with tab1:
         if st.button("🚀 執行 Gemini 視覺直讀識別（秒殺一切拼音雜訊）", key="ocr_btn_t1"):
             with st.spinner("🔮 Google Gemini 視覺大腦正全速透視大字中，請稍候..."):
                 b64_list = [convert_image_to_base64(f) for f in files]
-                # 🟢 震撼換腦：這裡直接呼叫真正的 Gemini 視覺接口！
                 clean_extracted_text = gemini_vision_extract(b64_list)
                 write_to_vault(clean_extracted_text)
                 st.success("✨ Gemini 完美原文已成功解鎖，請在下方查看！")
@@ -272,7 +265,9 @@ with tab1:
             if not title_t1.strip() or not current_text.strip(): st.error("標題和內容不能為空！")
             else:
                 with st.spinner("同步中..."):
-                    if save_to_github(title_t1.strip(), current_text): st.success("成功同步至 GitHub 雲端！")
+                    if save_to_github(title_t1.strip(), current_text): 
+                        st.session_state["current_lesson_title"] = title_t1.strip() # 鎖定當前課本名字
+                        st.success("成功同步至 GitHub 雲端！")
 
 with tab2:
     lessons = load_all_lessons()
@@ -283,6 +278,7 @@ with tab2:
         if st.button("📥 確認載入選取課文", key="load_btn_t2"):
             if sel != "-- 請選擇課文 --":
                 write_to_vault(load_single_lesson(sel))
+                st.session_state["current_lesson_title"] = sel # 鎖定當前課本名字
                 st.rerun()
                 
     with c_del:
@@ -293,6 +289,7 @@ with tab2:
                     mp3_ok = delete_audio_from_github(sel)
                     if txt_ok:
                         write_to_vault("") 
+                        st.session_state["current_lesson_title"] = ""
                         st.success(f"✨ 剷除成功！《{sel}》的文字檔及雲端聲帶快取已被永久消滅！")
                         time.sleep(1)
                         st.rerun()
@@ -305,14 +302,13 @@ with tab2:
     with c3:
         default_name = sel if sel != "-- 請選擇課文 --" else ""
         title_t2 = st.text_input("請輸入課文標題：", value=default_name, key="title_t2")
-    with c4:
-        st.write(" ")
-        st.write(" ")
-        if st.button("💾 確認儲存至 Git", key="save_btn_t2"):
-            if not title_t2.strip() or not current_text.strip(): st.error("標題和內容不能為空！")
-            else:
-                with st.spinner("同步中..."):
-                    if save_to_github(title_t2.strip(), current_text): st.success("成功同步至 GitHub 雲端！")
+    if st.button("💾 確認儲存至 Git", key="save_btn_t2"):
+        if not title_t2.strip() or not current_text.strip(): st.error("標題和內容不能為空！")
+        else:
+            with st.spinner("同步中..."):
+                if save_to_github(title_t2.strip(), current_text): 
+                    st.session_state["current_lesson_title"] = title_t2.strip()
+                    st.success("成功同步至 GitHub 雲端！")
 
 with tab3:
     st.subheader("📢 曉曉老師聽寫默書專區")
@@ -322,10 +318,16 @@ with tab3:
     if st.button("📥 確認切換並載入聽寫課文", key="load_btn_t3"):
         if sel_t3 != "-- 請選擇課文 --":
             write_to_vault(load_single_lesson(sel_t3))
+            st.session_state["current_lesson_title"] = sel_t3 # 🟢 修正一：點擊確認載入聽寫課文，立刻強行同步全域狀態！
             st.rerun()
             
     st.markdown("---")
     st.markdown("#### 📖 當前準備默書的課文內容：")
+    
+    # 展示目前標題狀態
+    active_title = st.session_state["current_lesson_title"]
+    if active_title:
+        st.markdown(f"**當前載入課文：** 🏆 `{active_title}`")
     
     if current_text.strip():
         st.markdown(
@@ -352,17 +354,17 @@ with tab3:
         st.markdown("---")
         st.markdown("#### 🚀 終極連播：全篇自動連續聽寫（-60%最慢、重覆間停4秒、寫字定格8秒）")
         
+        # 🟢 修正二：檢測快取不再使用不穩定的 sel_t3，而是直接使用實時鎖定嘅 active_title
         cached_audio = None
-        if sel_t3 != "-- 請選擇課文 --":
-            with st.spinner("🔍 正在檢測雲端是否有現成音軌快取..."):
-                cached_audio = load_audio_from_github(sel_t3)
+        if active_title:
+            with st.spinner(f"🔍 正在連線 GitHub 讀取《{active_title}》的現成 MP3 聽寫軌..."):
+                cached_audio = load_audio_from_github(active_title)
         
         if cached_audio:
-            st.success("⚡ 偵測到雲端已有完美的快取音軌！一秒解鎖直接開播，無需重新等待生成！")
+            st.success(f"⚡ 偵測到雲端已有《{active_title}》的完美快取音軌！一秒解鎖直接開播，無需重新等待生成！")
             st.audio(cached_audio, format="audio/mp3")
         else:
-            if sel_t3 != "-- 請選擇課文 --":
-                st.info("💡 這課書目前尚未在 GitHub 儲存音軌，首次默書請點擊下方按鈕進行【全新生成與自動備份】。")
+            st.info("💡 雲端目前尚未有此課書的音軌快取。首次默書請點擊下方按鈕進行【全新生成與自動上傳備份】。")
             
             if st.button("🏁 一鍵產生【整篇連續默書】音軌", key="play_all_btn"):
                 progress_text = "曉曉老師正在全速封裝【物理防壓縮】最高規格聽寫音軌中，請稍候..."
@@ -407,12 +409,18 @@ with tab3:
                     full_mp3 = b"".join(mp3_final_list)
                     my_bar.progress(100, text="🎉 音軌全面合成完畢！")
                     
-                    if sel_t3 != "-- 請選擇課文 --":
-                        with st.spinner("💾 正在自動將此完美音軌永久同步備份至 GitHub 雲端..."):
-                            if save_audio_to_github(sel_t3, full_mp3):
-                                st.success(f"✨ 商業級優化成功！《{sel_t3}》的音軌已成功在 GitHub 備份存檔！")
+                    # 🟢 修正三：自動上傳也使用實時 active_title
+                    if active_title:
+                        with st.spinner(f"💾 正在自動將此完美音軌永久同步備份至 GitHub 為《{active_title}.mp3》..."):
+                            if save_audio_to_github(active_title, full_mp3):
+                                st.success(f"✨ 商業級優化成功！《{active_title}》的音軌已成功在 GitHub 備份存檔，下次打開立馬秒播！")
+                    else:
+                        # 備份防禦機制：如果真的沒標題，就用當前時間戳臨時命名存檔
+                        temp_title = f"未命名課文_{int(time.time())}"
+                        save_audio_to_github(temp_title, full_mp3)
                     
                     st.audio(full_mp3, format="audio/mp3")
+                    st.rerun() # 重新刷新以立刻載入快取組件
                 else: 
                     st.error("⚠️ 音軌生成失敗。")
                     my_bar.empty()
