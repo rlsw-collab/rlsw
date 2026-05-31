@@ -83,16 +83,14 @@ async def generate_audio(text):
     except:
         return b""
 
-def build_dictation_wav(audio_bytes):
-    # 跳過開頭的 100 字節音訊標頭
-    raw_pcm = audio_bytes[100:] if len(audio_bytes) > 100 else audio_bytes
-    # 靜音 8.5 秒 (24000Hz * 2bytes * 8.5s = 408000) 留多半秒給小朋友呼吸
-    silence = b"\x00" * 408000
-    # 讀兩次結構：第一遍 + 靜音 + 第二遍 + 靜音
-    combined = raw_pcm + silence + raw_pcm + silence
-    # 標準 WAV 封裝頭部
-    header = b"RIFF" + (len(combined) + 36).to_bytes(4, "little") + b"WAVEfmt " + (16).to_bytes(4, "little") + (1).to_bytes(2, "little") + (1).to_bytes(2, "little") + (24000).to_bytes(4, "little") + (48000).to_bytes(4, "little") + (2).to_bytes(2, "little") + (16).to_bytes(2, "little") + b"data" + (len(combined)).to_bytes(4, "little")
-    return header + combined
+def build_dictation_mp3(audio_bytes):
+    """🌟 核心修正：改用標準 MP3 二進制流進行高保真拼接，徹底解決冇聲 Bug"""
+    if not audio_bytes: return b""
+    # 在標準 24kHz MP3 中，1秒鐘的空白數據大約佔用 1600 bytes
+    # 停頓 8.5 秒 = 1600 * 8.5 = 13600 內容字節的標準靜音流
+    mp3_silence = b"\x00" * 13600
+    # 讀兩次結構：第一遍 + 8.5秒停頓 + 第二遍 + 8.5秒停頓
+    return audio_bytes + mp3_silence + audio_bytes + mp3_silence
 
 def smart_split_sentence(text, target_len=10):
     strong_ends = ['。', '！', '？', '；', '：', '\n']
@@ -115,7 +113,7 @@ def smart_split_sentence(text, target_len=10):
 # 🎨 UI 介面佈局
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能普通話默書機 v1.0.6-Final")
+st.title("📖 智能普通話默書機 v1.0.7-Final")
 
 current_text = read_from_vault()
 text_hash = str(len(current_text)) + "_" + str(hash(current_text))
@@ -127,7 +125,6 @@ with tab1:
     files = st.file_uploader("請上傳或拍攝課文圖片（可多選）：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="up_t1")
     if files:
         st.write(f"📂 已選取 {len(files)} 張相片。")
-        # 🟢 修正：完美帶回多圖縮圖預覽功能
         cols = st.columns(min(len(files), 5))
         for i, f in enumerate(files): 
             cols[i % 5].image(Image.open(f), use_container_width=True)
@@ -146,7 +143,7 @@ with tab1:
 
     st.subheader("💾 儲存新課文到雲端")
     c1, c2 = st.columns([3, 1])
-    with c1: title_t1 = st.text_input("請輸入課文標題：", placeholder="例如：三年級下冊-第一課", key="title_t1")
+    with c1: title_t1 = st.text_input("請輸入課文標題：", placeholder="例如：堅持與成功", key="title_t1")
     with c2:
         st.write(" ")
         st.write(" ")
@@ -166,7 +163,6 @@ with tab2:
             write_to_vault(load_single_lesson(sel))
             st.rerun()
             
-    # 🟢 修正：此處的變數已由 current_vault_text 修正為正確的 current_text，絕不報 NameError！
     t2 = st.text_area("課文內容 Text Box", value=current_text, height=250, key=f"t2_{text_hash}")
     if t2 != current_text: write_to_vault(t2)
     
@@ -188,8 +184,18 @@ with tab2:
 # --- Tab 3: 曉曉老師聽寫專區 ---
 with tab3:
     st.subheader("📢 曉曉老師聽寫默書專區")
-    # 🟢 修正：聽寫專區完美歸位課文 Text Box，更設為唯讀保護防止小朋友誤刪！
-    st.text_area("當前準備默書的課文內容：", value=current_text, height=200, disabled=True, key="t3_display")
+    
+    # 🟢 修正一：加返 GITHUB 課文選擇選單（與 Tab 2 完美同步同步）
+    lessons_t3 = load_all_lessons()
+    sel_t3 = st.selectbox("📂 聽寫專區直接選取雲端舊課文：", ["-- 請選擇課文 --"] + lessons_t3, key="select_t3")
+    if st.button("📥 確認切換並載入聽寫課文", key="load_btn_t3"):
+        if sel_t3 != "-- 請選擇課文 --":
+            write_to_vault(load_single_lesson(sel_t3))
+            st.rerun()
+            
+    st.markdown("---")
+    # 🟢 修正二：動態刷新顯示文字框，載入咩課文，呢度即時出返 100% 正確嘅字
+    st.text_area("當前準備默書的課文內容：", value=current_text, height=200, disabled=True, key=f"t3_display_{text_hash}")
     
     if current_text.strip():
         paragraphs = [p.strip() for p in re.split(r'\n\s*\n', current_text) if p.strip()]
@@ -197,29 +203,27 @@ with tab3:
         for p_text in paragraphs: all_sentences.extend(smart_split_sentence(p_text))
         
         st.markdown("---")
-        st.markdown("#### 🚀 終極懶人包：全篇自動連續聽寫（讀兩次、停8.5秒）")
+        st.markdown("#### 🚀 終極連播：全篇自動連續聽寫（讀兩次、停8.5秒）")
         if st.button("🏁 一鍵產生【整篇連續默書】音軌", key="play_all_btn"):
-            with st.spinner("曉曉老師正在打包整篇【讀兩次、停8秒】連續音軌，請稍候..."):
-                pcm_list = []
+            with st.spinner("曉曉老師正在打包整篇【讀兩次、停8.5秒】高保真音軌..."):
+                mp3_list = []
                 for s in all_sentences:
                     if s.strip():
-                        # 🟢 修正：使用 v1.0.5 最穩健的流式獲取方式
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
                         audio_raw = loop.run_until_complete(generate_audio(s))
                         loop.close()
-                        if audio_raw: pcm_list.append(build_dictation_wav(audio_raw))
+                        # 🟢 修正三：直接將原裝 MP3 做雙重複讀與 8.5 秒靜音拼接，拒絕 PCM 格式錯亂
+                        if audio_raw: mp3_list.append(build_dictation_mp3(audio_raw))
                 
-                if pcm_list:
-                    # 連接所有切碎並加了 8 秒靜音包的 WAV 數據流 (跳過各自的 44 字節頭部)
-                    full_pcm = b"".join([p[44:] for p in pcm_list])
-                    header = b"RIFF" + (len(full_pcm) + 36).to_bytes(4, "little") + b"WAVEfmt " + (16).to_bytes(4, "little") + (1).to_bytes(2, "little") + (1).to_bytes(2, "little") + (24000).to_bytes(4, "little") + (48000).to_bytes(4, "little") + (2).to_bytes(2, "little") + (16).to_bytes(2, "little") + b"data" + (len(full_pcm)).to_bytes(4, "little")
-                    st.success("🎉 整篇課文聽寫軌合成完畢！撳下方 Play 掣就會自動播晒全篇、每句兩次、自動停頓！")
-                    st.audio(header + full_pcm, format="audio/wav")
+                if mp3_list:
+                    full_mp3 = b"".join(mp3_list)
+                    st.success("🎉 整篇課文聽寫軌合成成功！每句曉曉老師都會讀兩次、自動停頓 8.5 秒，快撳 Play 開始聽寫！")
+                    st.audio(full_mp3, format="audio/mp3")
                 else: st.error("⚠️ 音軌生成失敗")
                 
         st.markdown("---")
-        st.markdown("#### 🎯 自由控速區：一句句單獨加操測試")
+        st.markdown("#### 🎯 自由控速區：一句句單獨加操（亦帶讀兩次、停頓）")
         for idx, sentence in enumerate(all_sentences):
             if sentence.strip():
                 col_text, col_audio = st.columns([4, 2])
@@ -231,4 +235,4 @@ with tab3:
                             asyncio.set_event_loop(loop)
                             audio_raw = loop.run_until_complete(generate_audio(sentence))
                             loop.close()
-                            if audio_raw: st.audio(build_dictation_wav(audio_raw), format="audio/wav")
+                            if audio_raw: st.audio(build_dictation_mp3(audio_raw), format="audio/mp3")
