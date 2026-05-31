@@ -25,7 +25,6 @@ if "AI_TOKEN" in st.secrets and "GIT_TOKEN" in st.secrets:
     AI_TOKEN = st.secrets["AI_TOKEN"]
     GIT_TOKEN = st.secrets["GIT_TOKEN"]
 else:
-    # 如果在本地測試，先用回原來的單一檔案
     TOKEN_PATH = r"C:\Users\roysw\Desktop\DictationBot\GitHubToken.txt"
     if os.path.exists(TOKEN_PATH):
         with open(TOKEN_PATH, "r", encoding="utf-8") as f:
@@ -45,7 +44,6 @@ def get_github_file_url(filename):
     return f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{filename}"
 
 def save_to_github(title, content):
-    # 📝 儲存檔案使用具備寫入權限的 GIT_TOKEN
     if not GIT_TOKEN:
         return False, "未偵測到有效的 GIT_TOKEN"
     filename = f"{title}.txt"
@@ -87,11 +85,8 @@ def load_single_lesson(title):
     return ""
 
 def ai_correct_text(bad_text):
-    # 🧠 呼叫 AI 使用當初完美的 AI_TOKEN
-    if not AI_TOKEN: 
-        return bad_text
+    if not AI_TOKEN: return bad_text
     try:
-        # 第一層：物理過濾英文字母與數字（彻底消滅任何拼音干擾）
         cleaned_chars = []
         for char in bad_text:
             if '\u4e00' <= char <= '\u9fff' or char in '，。！？；：、「」『』《》·——……\n ':
@@ -99,28 +94,11 @@ def ai_correct_text(bad_text):
         filtered_text = "".join(cleaned_chars)
         filtered_text = re.sub(r' +', ' ', filtered_text)
 
-        client = ChatCompletionsClient(
-            endpoint="https://models.inference.ai.azure.com", 
-            credential=AzureKeyCredential(AI_TOKEN)
-        )
-        
-        prompt = """
-        你是一個專門修復小學課文 OCR 錯誤的頂級專家。
-        請根據傳進來的繁體中文殘卷，將其還原成 100% 通順、精準、符合小學課本邏輯的【繁體中文課文原文】。
-        修復重點字詞：
-        - 修正錯字（例如將 "決地" 修正為 "決定"、"要微" 修正為 "要我們"）。
-        - 完美還原人名和品牌："美國蘋果公司"、"史提夫·喬布斯"、"愛德華·詹納"。
-        - 還原古語名言：「鍥而不捨，金石可鏤。」
-        絕對不要包含任何拼音、Markdown 語法、註解或額外解釋，直接輸出修復後的純課文。
-        """
-        
-        response = client.complete(
-            messages=[{"role": "user", "content": prompt + "\n乾淨中文殘卷:\n" + filtered_text}], 
-            model="gpt-4o"
-        )
+        client = ChatCompletionsClient(endpoint="https://models.inference.ai.azure.com", credential=AzureKeyCredential(AI_TOKEN))
+        prompt = """你是一個專門修復小學課文 OCR 錯誤的頂級專家。請根據傳進來的繁體中文殘卷，將其還原成 100% 通順、精準、符合小學課本邏輯的【繁體中文課文原文】。絕對不要包含任何拼音、Markdown 語法、註解或額外解釋，直接輸出修復後的純課文。"""
+        response = client.complete(messages=[{"role": "user", "content": prompt + "\n乾淨中文殘卷:\n" + filtered_text}], model="gpt-4o")
         return response.choices[0].message.content.strip()
-    except Exception as e:
-        return bad_text
+    except: return bad_text
 
 async def generate_single_audio(text):
     clean_text = re.sub(r'[，。！？；：、「」『』《》·——……]', ' ', text)
@@ -151,6 +129,25 @@ def build_dictation_wav(audio_bytes, sample_rate=24000):
     header += (len(combined_pcm)).to_bytes(4, "little")
     return header + combined_pcm
 
+def build_full_lesson_wav(pcm_list, sample_rate=24000):
+    """【全篇一鍵朗讀黑科技】：將所有單句的默書音軌，首尾相接拼成一條完整長音軌"""
+    full_pcm = b""
+    for pcm in pcm_list:
+        full_pcm += pcm[44:] # 剃除每句的 WAV 標頭只保留純音訊
+    
+    header = b"RIFF"
+    header += (len(full_pcm) + 36).to_bytes(4, "little")
+    header += b"WAVEfmt "
+    header += (16).to_bytes(4, "little")
+    header += (1).to_bytes(2, "little")       
+    header += (sample_rate).to_bytes(4, "little") 
+    header += (sample_rate * 2).to_bytes(4, "little")
+    header += (2).to_bytes(2, "little")
+    header += (16).to_bytes(2, "little")      
+    header += b"data"
+    header += (len(full_pcm)).to_bytes(4, "little")
+    return header + full_pcm
+
 def smart_split_sentence(text, target_len=10):
     strong_ends = ['。', '！', '？', '——', '……']
     split_chars = ['，', '、', '；', '：']
@@ -171,75 +168,159 @@ def smart_split_sentence(text, target_len=10):
     return sub_sentences
 
 # ==========================================================
-# 🎨 UI 介面設計
+# 🎨 UI 介面設計（三大功能完全獨立）
 # ==========================================================
 st.set_page_config(page_title="智能雲端普通話默書機", page_icon="📖", layout="wide")
 st.title("📖 智能普通話默書機 (雲端網頁版)")
 
-if "current_text" not in st.session_state:
-    st.session_state["current_text"] = ""
+# 用來存檔和修改的全域 Session 變數
+if "tab1_text" not in st.session_state: st.session_state["tab1_text"] = ""
+if "tab2_text" not in st.session_state: st.session_state["tab2_text"] = ""
 
-st.sidebar.header("📁 雲端 Git 課本庫")
-all_lessons = load_all_lessons_from_github()
-if all_lessons:
-    selected_lesson = st.sidebar.selectbox("開啓舊課文：", ["-- 請選擇 --"] + all_lessons)
-    if selected_lesson != "-- 請選擇 --":
-        if st.sidebar.button("確認載入課文"):
-            st.session_state["current_text"] = load_single_lesson(selected_lesson)
-            st.sidebar.success(f"已成功載入: {selected_lesson}")
-            st.rerun()
+# 頂部三大功能導航
+tab1, tab2, tab3 = st.tabs([
+    "📸 1. 批次影相 / 多圖上傳功能", 
+    "✍️ 2. 手動輸入 / 課文修改功能", 
+    "📢 3. 曉曉老師【聽寫專用】獨立功能"
+])
 
-tab1, tab2 = st.tabs(["📸 批次影相 / 多圖上傳來源", "✍️ 手動輸入 / 課文修改"])
-
+# ==========================================================
+# 功能一：批次影相 / 多圖上傳功能（無音軌）
+# ==========================================================
 with tab1:
-    uploaded_files = st.file_uploader("請上傳或拍攝課文圖片（可多選）：", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+    st.subheader("📸 拍攝/上傳新課文")
+    uploaded_files = st.file_uploader("請上傳或拍攝課文圖片（可多選）：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="uploader_t1")
+    
+    # 🔥 顯示圖片預覽圖
     if uploaded_files:
-        if st.button("🚀 執行多圖聯合 AI OCR 識別與修復"):
+        st.write("🖼️ 圖片預覽：")
+        cols = st.columns(min(len(uploaded_files), 5)) # 最多一行顯示 5 張縮圖
+        for i, f in enumerate(uploaded_files):
+            with cols[i % 5]:
+                st.image(Image.open(f), use_container_width=True, caption=f"第 {i+1} 張")
+                
+        if st.button("🚀 執行多圖聯合 AI OCR 識別與修復", key="ocr_btn_t1"):
             full_raw_text = ""
             with st.spinner("正在合併提取並交給 GPT-4o 修正中..."):
                 for f in uploaded_files:
                     img = Image.open(f)
                     raw = pytesseract.image_to_string(img, config=r'-l chi_tra+chi_sim --psm 3')
                     full_raw_text += f"\n{raw}\n"
-                fixed_text = ai_correct_text(full_raw_text)
-                st.session_state["current_text"] = fixed_text
-                st.success("✨ 識別並修正成功！請切換至『手動輸入 / 課文修改』標籤查看。")
+                st.session_state["tab1_text"] = ai_correct_text(full_raw_text)
+                st.success("✨ 識別並修正成功！內容已填入下方的 Text Box。")
 
+    # 中間：課文內容 Text Box
+    lesson_content_t1 = st.text_area("課文內容 Text Box (可在此進行修改)", value=st.session_state["tab1_text"], height=250, key="text_area_t1")
+    st.session_state["tab1_text"] = lesson_content_t1
+
+    # 最後：儲存課文到雲端
+    st.subheader("💾 儲存新課文到雲端")
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        title_t1 = st.text_input("請輸入課文標題：", placeholder="例如：三年級下冊-第一課", key="title_t1")
+    with c2:
+        st.write(" ")
+        st.write(" ")
+        if st.button("💾 確認儲存至 Git", key="save_btn_t1"):
+            if not title_t1.strip() or not lesson_content_t1.strip():
+                st.error("標題和內容不能為空！")
+            else:
+                with st.spinner("正在同步至 GitHub..."):
+                    success, msg = save_to_github(title_t1.strip(), lesson_content_t1)
+                    st.success(msg) if success else st.error(msg)
+
+# ==========================================================
+# 功能二：手動輸入 / 課文修改功能（無音軌）
+# ==========================================================
 with tab2:
-    lesson_content = st.text_area("課文內容 Text Box", value=st.session_state["current_text"], height=250)
-    st.session_state["current_text"] = lesson_content
+    st.subheader("✍️ 載入、修改與編寫課文")
+    
+    # 🌟 雲端 Git 課本庫移到最頂部
+    all_lessons = load_all_lessons_from_github()
+    if all_lessons:
+        selected_lesson = st.selectbox("📂 雲端 Git 課本庫（選取舊課文進行修改）：", ["-- 請選擇課文 --"] + all_lessons, key="select_t2")
+        if selected_lesson != "-- 請選擇 --" and st.button("確認載入選取課文", key="load_btn_t2"):
+            st.session_state["tab2_text"] = load_single_lesson(selected_lesson)
+            st.success(f"已成功載入: {selected_lesson}")
+    else:
+        st.info("雲端目前沒有已儲存的課文檔。")
 
-st.subheader("💾 儲存課文到雲端")
-col1, col2 = st.columns([2, 1])
-with col1:
-    lesson_title = st.text_input("請輸入課文標題：", placeholder="未命名課文")
-with col2:
-    st.write(" ")
-    st.write(" ")
-    if st.button("💾 確認儲存至 Git"):
-        if not lesson_title.strip() or not lesson_content.strip():
-            st.error("標題和內容不能為空！")
-        else:
-            with st.spinner("正在同步至 GitHub..."):
-                success, msg = save_to_github(lesson_title.strip(), lesson_content)
-                if success:
-                    st.success(msg)
-                    time.sleep(1)
-                    st.rerun()
-                else: st.error(msg)
+    # 中間：課文內容 Text Box
+    lesson_content_t2 = st.text_area("課文內容 Text Box", value=st.session_state["tab2_text"], height=250, key="text_area_t2")
+    st.session_state["tab2_text"] = lesson_content_t2
 
-if lesson_content.strip():
-    st.markdown("---")
-    st.subheader("📢 曉曉老師【聽寫專用】標準音軌")
-    paragraphs = [p.strip() for p in re.split(r'\n\s*\n', lesson_content) if p.strip()]
-    for p_idx, p_text in enumerate(paragraphs):
-        st.markdown(f"### 🔔 第 {p_idx+1} 段")
-        sentences = smart_split_sentence(p_text)
-        for s_idx, sentence in enumerate(sentences):
-            col_text, col_audio = st.columns([3, 2])
-            with col_text:
-                st.write(f"📖 `{sentence}`")
-            with col_audio:
-                base_audio = asyncio.run(generate_single_audio(sentence))
-                dictation_audio = build_dictation_wav(base_audio)
-                st.audio(dictation_audio, format="audio/wav")
+    # 最後：儲存課文到雲端
+    st.subheader("💾 重新儲存/覆蓋課文到雲端")
+    c3, c4 = st.columns([2, 1])
+    with c3:
+        # 如果是加載出來的，預設幫家長填好原本的標題
+        default_title = selected_lesson if (all_lessons and selected_lesson != "-- 請選擇課文 --") else ""
+        title_t2 = st.text_input("請輸入課文標題（相同標題將會直接覆蓋更新）：", value=default_title, key="title_t2")
+    with c4:
+        st.write(" ")
+        st.write(" ")
+        if st.button("💾 確認儲存至 Git", key="save_btn_t2"):
+            if not title_t2.strip() or not lesson_content_t2.strip():
+                st.error("標題和內容不能為空！")
+            else:
+                with st.spinner("正在同步至 GitHub..."):
+                    success, msg = save_to_github(title_t2.strip(), lesson_content_t2)
+                    if success:
+                        st.success(msg)
+                        time.sleep(0.5)
+                        st.rerun()
+                    else: st.error(msg)
+
+# ==========================================================
+# 功能三：曉曉老師【聽寫專用】獨立功能
+# ==========================================================
+with tab3:
+    st.subheader("📢 曉曉老師聽寫默書專區")
+    
+    # 1. 首先係雲端 Git 課本庫係課文選取
+    all_lessons_t3 = load_all_lessons_from_github()
+    if all_lessons_t3:
+        selected_lesson_t3 = st.selectbox("🎯 請選擇今天要默書的課文：", ["-- 請選擇課文 --"] + all_lessons_t3, key="select_t3")
+        
+        if selected_lesson_t3 != "-- 請選擇課文 --":
+            lesson_text_t3 = load_single_lesson(selected_lesson_t3)
+            paragraphs_t3 = [p.strip() for p in re.split(r'\n\s*\n', lesson_text_t3) if p.strip()]
+            
+            # 將整篇課文拆解成句子陣列
+            all_sentences = []
+            for p_text in paragraphs_t3:
+                all_sentences.extend(smart_split_sentence(p_text))
+            
+            st.markdown(f"### 📖 當前準備默書：《{selected_lesson_t3}》")
+            
+            # 2. 🌟 終極一鍵功能：一鍵播晒全部
+            st.markdown("---")
+            st.markdown("#### 🚀 終極懶人包：全篇自動連續聽寫")
+            if st.button("🏁 一鍵產生【整篇連續默書】音軌", key="play_all_btn"):
+                with st.spinner("曉曉老師正在全速為整篇課文打包音軌，請稍候..."):
+                    pcm_list = []
+                    for sentence in all_sentences:
+                        base_audio = asyncio.run(generate_single_audio(sentence))
+                        dictation_wav = build_dictation_wav(base_audio)
+                        pcm_list.append(dictation_wav)
+                    
+                    full_lesson_audio = build_full_lesson_wav(pcm_list)
+                    st.success("🎉 整篇課文聽寫軌合成完畢！撳下方 Play 鍵就會【自動播晒全篇、每句兩次、自動停8秒】！")
+                    st.audio(full_lesson_audio, format="audio/wav")
+            
+            # 3. 🌟 自由選擇區：或者一句句選播
+            st.markdown("---")
+            st.markdown("#### 🎯 自由控速區：一句句單獨選播")
+            
+            for idx, sentence in enumerate(all_sentences):
+                col_text, col_audio = st.columns([4, 2])
+                with col_text:
+                    st.write(f"第 {idx+1} 句： `{sentence}`")
+                with col_audio:
+                    if st.button(f"📢 聽寫第 {idx+1} 句", key=f"single_btn_{idx}"):
+                        with st.spinner("合成中..."):
+                            base_audio = asyncio.run(generate_single_audio(sentence))
+                            dictation_audio = build_dictation_wav(base_audio)
+                            st.audio(dictation_audio, format="audio/wav")
+    else:
+        st.info("雲端目前沒有課文，請先去功能一或功能二儲存課文。")
