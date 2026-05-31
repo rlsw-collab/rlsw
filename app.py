@@ -68,7 +68,6 @@ def save_to_github(title, content):
     return (True, "成功同步至 GitHub 雲端！") if put_res.status_code in [200, 201] else (False, f"Git 錯誤: {put_res.status_code}")
 
 def delete_from_github(title):
-    """【🔥 全新功能】：從 GitHub 儲存庫中徹底刪除指定的課文文字檔"""
     if not GIT_TOKEN:
         return False, "未偵測到有效的 GIT_TOKEN"
     filename = f"{title}.txt"
@@ -77,7 +76,6 @@ def delete_from_github(title):
         "Authorization": f"token {GIT_TOKEN}",
         "Accept": "application/vnd.github.v3+json"
     }
-    # 刪除前必須先獲取該檔案的 sha 指紋
     res = requests.get(url, headers=headers)
     if res.status_code == 200:
         sha = res.json().get("sha")
@@ -96,9 +94,12 @@ def load_all_lessons_from_github():
     if not GIT_TOKEN: return []
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons"
     headers = {"Authorization": f"token {GIT_TOKEN}"}
-    res = requests.get(url, headers=headers)
-    if res.status_code == 200:
-        return [f["name"].replace(".txt", "") for f in res.json() if f["name"].endswith(".txt")]
+    try:
+        res = requests.get(url, headers=headers)
+        if res.status_code == 200:
+            return [f["name"].replace(".txt", "") for f in res.json() if f["name"].endswith(".txt")]
+    except:
+        pass
     return []
 
 def load_single_lesson(title):
@@ -192,4 +193,171 @@ def smart_split_sentence(text, target_len=10):
     return sub_sentences
 
 # ==========================================================
-#
+# 🎨 UI 介面設計（安全無卡死 Rerun 頂級防護版）
+# ==========================================================
+st.set_page_config(page_title="智能雲端普通話默書機", page_icon="📖", layout="wide")
+st.title("📖 智能普通話默書機 (雲端網頁版)")
+
+# 初始化 Session 緩存
+if "tab1_text" not in st.session_state: st.session_state["tab1_text"] = ""
+if "tab2_text" not in st.session_state: st.session_state["tab2_text"] = ""
+if "refresh_counter" not in st.session_state: st.session_state["refresh_counter"] = 0
+
+# 使用無卡死導航標籤
+tab1, tab2, tab3 = st.tabs([
+    "📸 1. 批次影相 / 多圖上傳功能", 
+    "✍️ 2. 手動輸入 / 課文修改功能", 
+    "📢 3. 曉曉老師【聽寫專用】獨立功能"
+])
+
+# ==========================================================
+# 功能一：批次影相 / 多圖上傳功能
+# ==========================================================
+with tab1:
+    st.subheader("📸 拍攝/上傳新課文")
+    uploaded_files = st.file_uploader("請上傳或拍攝課文圖片（可多選）：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="uploader_t1")
+    
+    if uploaded_files:
+        st.write("🖼️ 圖片預覽：")
+        cols = st.columns(min(len(uploaded_files), 5))
+        for i, f in enumerate(uploaded_files):
+            with cols[i % 5]:
+                st.image(Image.open(f), use_container_width=True, caption=f"第 {i+1} 張")
+                
+        if st.button("🚀 執行多圖聯合 AI OCR 識別與修復", key="ocr_btn_t1"):
+            full_raw_text = ""
+            with st.spinner("正在合併提取並交給 GPT-4o 修正中..."):
+                for f in uploaded_files:
+                    img = Image.open(f)
+                    raw = pytesseract.image_to_string(img, config=r'-l chi_tra+chi_sim --psm 3')
+                    full_raw_text += f"\n{raw}\n"
+                st.session_state["tab1_text"] = ai_correct_text(full_raw_text)
+                st.success("✨ 識別並修正成功！內容已填入下方的 Text Box。")
+
+    lesson_content_t1 = st.text_area("課文內容 Text Box (可在此進行修改)", value=st.session_state["tab1_text"], height=250, key="text_area_t1")
+    st.session_state["tab1_text"] = lesson_content_t1
+
+    st.subheader("💾 儲存新課文到雲端")
+    c1, c2 = st.columns([2, 1])
+    with c1:
+        title_t1 = st.text_input("請輸入課文標題：", placeholder="例如：三年級下冊-第一課", key="title_t1")
+    with c2:
+        st.write(" ")
+        st.write(" ")
+        if st.button("💾 確認儲存至 Git", key="save_btn_t1"):
+            if not title_t1.strip() or not lesson_content_t1.strip():
+                st.error("標題和內容不能為空！")
+            else:
+                with st.spinner("正在同步至 GitHub..."):
+                    success, msg = save_to_github(title_t1.strip(), lesson_content_t1)
+                    if success:
+                        st.success(msg)
+                    else: st.error(msg)
+
+# ==========================================================
+# 功能二：手動輸入 / 課文修改功能（安全防卡死優化）
+# ==========================================================
+with tab2:
+    st.subheader("✍️ 載入、修改與編寫課文")
+    
+    # 每次利用內部計數器刷新列表，避開硬重整白屏
+    all_lessons = load_all_lessons_from_github()
+    selected_lesson = "-- 請選擇課文 --"
+    
+    if all_lessons:
+        col_select, col_delete = st.columns([4, 2])
+        
+        with col_select:
+            selected_lesson = st.selectbox("📂 雲端 Git 課本庫（選取舊課文進行修改）：", ["-- 請選擇課文 --"] + all_lessons, key=f"select_t2_{st.session_state['refresh_counter']}")
+            if selected_lesson != "-- 請選擇課文 --":
+                if st.button("確認載入選取課文", key="load_btn_t2"):
+                    st.session_state["tab2_text"] = load_single_lesson(selected_lesson)
+                    st.success(f"已成功載入: {selected_lesson}")
+                
+        with col_delete:
+            st.write(" ") 
+            st.write(" ")
+            if selected_lesson != "-- 請選擇課文 --":
+                if st.button(f"🗑️ 永久刪除《{selected_lesson}》", key="delete_btn_t2", type="primary"):
+                    with st.spinner("正在從 GitHub 雲端抹殺檔案..."):
+                        success, msg = delete_from_github(selected_lesson)
+                        if success:
+                            st.success(msg)
+                            st.session_state["tab2_text"] = "" 
+                            st.session_state["refresh_counter"] += 1 # 安全計數器，原地更新 UI 避開白屏
+                        else:
+                            st.error(msg)
+    else:
+        st.info("雲端目前沒有已儲存的課文檔。")
+
+    lesson_content_t2 = st.text_area("課文內容 Text Box", value=st.session_state["tab2_text"], height=250, key="text_area_t2")
+    st.session_state["tab2_text"] = lesson_content_t2
+
+    st.subheader("💾 重新儲存/覆蓋課文到雲端")
+    c3, c4 = st.columns([2, 1])
+    with c3:
+        default_title = selected_lesson if (all_lessons and selected_lesson != "-- 請選擇課文 --") else ""
+        title_t2 = st.text_input("請輸入課文標題（相同標題將會直接覆蓋更新）：", value=default_title, key="title_t2")
+    with c4:
+        st.write(" ")
+        st.write(" ")
+        if st.button("💾 確認儲存至 Git", key="save_btn_t2"):
+            if not title_t2.strip() or not lesson_content_t2.strip():
+                st.error("標題和內容不能為空！")
+            else:
+                with st.spinner("正在同步至 GitHub..."):
+                    success, msg = save_to_github(title_t2.strip(), lesson_content_t2)
+                    if success:
+                        st.success(msg)
+                        st.session_state["refresh_counter"] += 1
+                    else: st.error(msg)
+
+# ==========================================================
+# 功能三：曉曉老師【聽寫專用】獨立功能
+# ==========================================================
+with tab3:
+    st.subheader("📢 曉曉老師聽寫默書專區")
+    
+    all_lessons_t3 = load_all_lessons_from_github()
+    if all_lessons_t3:
+        selected_lesson_t3 = st.selectbox("🎯 請選擇今天要默書的課文：", ["-- 請選擇課文 --"] + all_lessons_t3, key="select_t3")
+        
+        if selected_lesson_t3 != "-- 請選擇課文 --":
+            lesson_text_t3 = load_single_lesson(selected_lesson_t3)
+            paragraphs_t3 = [p.strip() for p in re.split(r'\n\s*\n', lesson_text_t3) if p.strip()]
+            
+            all_sentences = []
+            for p_text in paragraphs_t3:
+                all_sentences.extend(smart_split_sentence(p_text))
+            
+            st.markdown(f"### 📖 當前準備默書：《{selected_lesson_t3}》")
+            
+            st.markdown("---")
+            st.markdown("#### 🚀 終極懶人包：全篇自動連續聽寫")
+            if st.button("🏁 一鍵產生【整篇連續默書】音軌", key="play_all_btn"):
+                with st.spinner("曉曉老師正在全速為整篇課文打包音軌，請稍候..."):
+                    pcm_list = []
+                    for sentence in all_sentences:
+                        base_audio = asyncio.run(generate_single_audio(sentence))
+                        dictation_wav = build_dictation_wav(base_audio)
+                        pcm_list.append(dictation_wav)
+                    
+                    full_lesson_audio = build_full_lesson_wav(pcm_list)
+                    st.success("🎉 整篇課文聽寫軌合成完畢！撳下方 Play 鍵就會【自動播晒全篇、每句兩次、自動停8秒】！")
+                    st.audio(full_lesson_audio, format="audio/wav")
+            
+            st.markdown("---")
+            st.markdown("#### 🎯 自由控速區：一句句單獨選播")
+            
+            for idx, sentence in enumerate(all_sentences):
+                col_text, col_audio = st.columns([4, 2])
+                with col_text:
+                    st.write(f"第 {idx+1} 句： `{sentence}`")
+                with col_audio:
+                    if st.button(f"📢 聽寫第 {idx+1} 句", key=f"single_btn_{idx}"):
+                        with st.spinner("合成中..."):
+                            base_audio = asyncio.run(generate_single_audio(sentence))
+                            dictation_audio = build_dictation_wav(base_audio)
+                            st.audio(dictation_audio, format="audio/wav")
+    else:
+        st.info("雲端目前沒有課文，請先去功能一或功能二儲存課文。")
