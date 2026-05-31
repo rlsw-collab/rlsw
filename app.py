@@ -41,7 +41,7 @@ def read_from_vault():
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================================
-# 🧠 核心功能函數 (新增：GitHub 音軌儲存與讀取)
+# 🧠 核心功能函數 
 # ==========================================================
 def save_to_github(title, content):
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.txt"
@@ -53,7 +53,6 @@ def save_to_github(title, content):
     return put_res.status_code in [200, 201]
 
 def save_audio_to_github(title, audio_bytes):
-    """🌟 新增功能：將合成好的終極完美聽寫 MP3 檔直接儲存到 GitHub 雲端"""
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.mp3"
     headers = {"Authorization": f"token {GIT_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     res = requests.get(url, headers=headers)
@@ -64,13 +63,36 @@ def save_audio_to_github(title, audio_bytes):
     return put_res.status_code in [200, 201]
 
 def load_audio_from_github(title):
-    """🌟 新增功能：從 GitHub 雲端直接撈取現成嘅 MP3，實現秒開播"""
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.mp3"
     headers = {"Authorization": f"token {GIT_TOKEN}"}
     res = requests.get(url, headers=headers)
     if res.status_code == 200:
         return base64.b64decode(res.json()["content"])
     return None
+
+# 🟢 新增功能：從 GitHub 物理刪除課文文字檔
+def delete_from_github(title):
+    url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.txt"
+    headers = {"Authorization": f"token {GIT_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    res = requests.get(url, headers=headers)
+    if res.status_code == 200:
+        sha = res.json()["sha"]
+        data = {"message": f"💥 智能默書機：刪除課文 {title}", "sha": sha, "branch": GH_BRANCH}
+        del_res = requests.delete(url, headers=headers, json=data)
+        return del_res.status_code == 200
+    return False
+
+# 🟢 新增功能：從 GitHub 物理刪除雲端快取音軌
+def delete_audio_from_github(title):
+    url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.mp3"
+    headers = {"Authorization": f"token {GIT_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    res = requests.get(url, headers=headers)
+    if res.status_code == 200:
+        sha = res.json()["sha"]
+        data = {"message": f"💥 智能默書機：刪除聽寫軌 {title}.mp3", "sha": sha, "branch": GH_BRANCH}
+        del_res = requests.delete(url, headers=headers, json=data)
+        return del_res.status_code == 200
+    return True # 如果本身就冇音軌快取，當作刪除成功
 
 def load_all_lessons():
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons"
@@ -162,7 +184,7 @@ def smart_split_sentence(text, target_len=14):
 # 🎨 UI 介面佈局
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能普通話默書機 v1.2.0-Final")
+st.title("📖 智能普通話默書機 v1.2.1-Final")
 
 current_text = read_from_vault()
 text_hash = str(len(current_text)) + "_" + str(hash(current_text))
@@ -183,7 +205,7 @@ with tab1:
                 st.success("✨ 文字已成功鎖定在下方文字框！")
                 st.rerun()
                 
-    t1 = st.text_area("課文內容 Text Box", value=current_text, height=250, key=f"t1_{text_hash}")
+    t1 = st.text_area("課文內容 Text Box (可在此進行手動調整)", value=current_text, height=250, key=f"t1_{text_hash}")
     if t1 != current_text: write_to_vault(t1)
 
     st.subheader("💾 儲存新課文到雲端")
@@ -198,13 +220,33 @@ with tab1:
                 with st.spinner("同步中..."):
                     if save_to_github(title_t1.strip(), current_text): st.success("成功同步至 GitHub 雲端！")
 
+# --- Tab 2: 載入與修改 (新增：文音雙刪功能) ---
 with tab2:
     lessons = load_all_lessons()
     sel = st.selectbox("📂 選取雲端舊課文：", ["-- 請選擇課文 --"] + lessons, key="select_t2")
-    if st.button("📥 確認載入選取課文", key="load_btn_t2"):
+    
+    c_load, c_del = st.columns([1, 1])
+    with c_load:
+        if st.button("📥 確認載入選取課文", key="load_btn_t2"):
+            if sel != "-- 請選擇課文 --":
+                write_to_vault(load_single_lesson(sel))
+                st.rerun()
+                
+    # 🟢 修正：完美加入「文音雙刪」安全按鈕
+    with c_del:
         if sel != "-- 請選擇課文 --":
-            write_to_vault(load_single_lesson(sel))
-            st.rerun()
+            if st.button("🗑️ 徹底刪除雲端課文及音軌快取", key="del_btn_t2", type="primary"):
+                with St.spinner(f"💥 正在從雲端徹底剷除《{sel}》的文字與 MP3 檔..."):
+                    # 同步刪除文字與音軌
+                    txt_ok = delete_from_github(sel)
+                    mp3_ok = delete_audio_from_github(sel)
+                    if txt_ok:
+                        write_to_vault("") # 清空當前保險箱
+                        st.success(f"✨ 剷除成功！《{sel}》的文字檔及雲端聲帶快取已被永久消滅！")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.error("⚠️ 刪除失敗，請檢查 GitHub 權限。")
             
     t2 = st.text_area("課文內容 Text Box", value=current_text, height=250, key=f"t2_{text_hash}")
     if t2 != current_text: write_to_vault(t2)
@@ -261,7 +303,6 @@ with tab3:
         st.markdown("---")
         st.markdown("#### 🚀 終極連播：全篇自動連續聽寫（-60%最慢、重覆間停4秒、寫字定格8秒）")
         
-        # 🟢 檢測與展示：先去 GitHub 查一下有沒有做過這課書的現成 MP3 快取檔
         cached_audio = None
         if sel_t3 != "-- 請選擇課文 --":
             with st.spinner("🔍 正在檢測雲端是否有現成音軌快取..."):
@@ -275,7 +316,6 @@ with tab3:
                 st.info("💡 這課書目前尚未在 GitHub 儲存音軌，首次默書請點擊下方按鈕進行【全新生成與自動備份】。")
             
             if st.button("🏁 一鍵產生【整篇連續默書】音軌", key="play_all_btn"):
-                # 🟢 修正一：完美引入 Progress Bar 進度條，讓等待不再盲目
                 progress_text = "曉曉老師正在全速封裝【物理防壓縮】最高規格聽寫音軌中，請稍候..."
                 my_bar = st.progress(0, text=progress_text)
                 
@@ -290,7 +330,6 @@ with tab3:
                 total_lines = len(dictation_units)
                 
                 for idx, (p_label, s_text) in enumerate(dictation_units):
-                    # 🟢 更新進度條
                     pct = int(((idx) / total_lines) * 100)
                     my_bar.progress(pct, text=f"⏳ 正在合成第 {idx+1}/{total_lines} 句：{s_text[:10]}...")
                     
@@ -319,11 +358,10 @@ with tab3:
                     full_mp3 = b"".join(mp3_final_list)
                     my_bar.progress(100, text="🎉 音軌全面合成完畢！")
                     
-                    # 🟢 修正二：如果用戶有選定舊課文標題，生成完即刻【自動悄悄上傳 MP3 到 GitHub 保險箱】
                     if sel_t3 != "-- 請選擇課文 --":
                         with st.spinner("💾 正在自動將此完美音軌永久同步備份至 GitHub 雲端..."):
                             if save_audio_to_github(sel_t3, full_mp3):
-                                st.success(f"✨ 商業級優化成功！《{sel_t3}》的音軌已成功在 GitHub 備份存檔，下次全家任何人打開網頁都能秒播！")
+                                st.success(f"✨ 商業級優化成功！《{sel_t3}》的音軌已成功在 GitHub 備份存檔！")
                     
                     st.audio(full_mp3, format="audio/mp3")
                 else: 
