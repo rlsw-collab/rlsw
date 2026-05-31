@@ -180,15 +180,15 @@ def smart_split_sentence(text, target_len=10):
     return sub_sentences
 
 # ==========================================================
-# 🎨 完美隔離鎖定：解耦回呼函數，三大 Tab 互不侵犯
+# 🎨 狀態監聽器：手動輸入時即時鎖定，絕不允許被空元件清空
 # ==========================================================
-def sync_t1_to_vault():
+def handle_t1_change():
     st.session_state["stable_vault"] = st.session_state["t1_field"]
 
-def sync_t2_to_vault():
+def handle_t2_change():
     st.session_state["stable_vault"] = st.session_state["t2_field"]
 
-# 初始化唯一全域保險箱
+# 初始化唯一不滅保險箱
 if "stable_vault" not in st.session_state: 
     st.session_state["stable_vault"] = ""
 
@@ -199,11 +199,10 @@ tab1, tab2, tab3 = st.tabs([
 ])
 
 # ==========================================================
-# 功能一：批次影相 / 多圖上傳功能（無音軌，帶縮圖預覽）
+# 功能一：批次影相 / 多圖上傳功能
 # ==========================================================
 with tab1:
     st.subheader("📸 拍攝/上傳新課文")
-    # 🔥 修正：補回 accept_multiple_files=True 徹底解鎖多圖批次上傳
     uploaded_files = st.file_uploader("請上傳或拍攝課文圖片（可多選）：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="up_t1")
     
     if uploaded_files:
@@ -219,18 +218,18 @@ with tab1:
                     img = Image.open(f)
                     raw = pytesseract.image_to_string(img, config=r'-l chi_tra+chi_sim --psm 3')
                     full_raw_text += f"\n{raw}\n"
-                # 🤖 直接塞入全域保險箱，利用 st.rerun 強制同步刷新
+                # 🌟 安全防禦：只有真正撳掣，才准改寫全域保險箱
                 st.session_state["stable_vault"] = ai_correct_text_strict(full_raw_text)
                 st.success("✨ 文字已成功鎖定在下方文字框！")
                 st.rerun()
 
-    # 🌟 核心安全防護：用 value 承載保險箱，用 on_change 和獨立 key 監聽手動修改，絕不打架
+    # 文字顯示與回寫一體化
     st.text_area(
         "課文內容 Text Box (可在此進行手動調整)", 
         value=st.session_state["stable_vault"], 
         height=250, 
-        key="t1_field", 
-        on_change=sync_t1_to_vault
+        key="t1_field",
+        on_change=handle_t1_change
     )
 
     st.subheader("💾 儲存新課文到雲端")
@@ -249,7 +248,7 @@ with tab1:
                     st.success(msg) if success else st.error(msg)
 
 # ==========================================================
-# 功能二：手動輸入 / 課文修改功能（雲端庫置頂、具備刪除掣）
+# 功能二：手動輸入 / 課文修改功能（100% 復活回復！）
 # ==========================================================
 with tab2:
     st.subheader("✍️ 載入、修改與編寫課文")
@@ -261,6 +260,7 @@ with tab2:
         with col_select:
             selected_lesson = st.selectbox("📂 選取雲端舊課文：", ["-- 請選擇課文 --"] + all_lessons, key="select_t2")
             if selected_lesson != "-- 請選擇課文 --" and st.button("📥 確認載入選取課文", key="load_btn_t2"):
+                # 🌟 核心防禦：強行拉取雲端文字寫入保險箱，並即時 Rerun 同步更新前端
                 st.session_state["stable_vault"] = load_single_lesson(selected_lesson)
                 st.success(f"已成功載入: {selected_lesson}")
                 st.rerun()
@@ -281,13 +281,13 @@ with tab2:
     else:
         st.info("雲端目前沒有已儲存的課文檔。")
 
-    # 🌟 相同防護解耦：Tab 2 專屬監聽器
+    # 🌟 相同防護：同步綁定
     st.text_area(
         "課文內容 Text Box", 
         value=st.session_state["stable_vault"], 
         height=250, 
-        key="t2_field", 
-        on_change=sync_t2_to_vault
+        key="t2_field",
+        on_change=handle_t2_change
     )
 
     st.subheader("💾 重新儲存/覆蓋課文到雲端")
@@ -311,7 +311,7 @@ with tab2:
                     else: st.error(msg)
 
 # ==========================================================
-# 功能三：曉曉老師【聽寫專用】獨立聽寫專區（直連雲端、一鍵連播）
+# 功能三：曉曉老師【聽寫專用】獨立功能
 # ==========================================================
 with tab3:
     st.subheader("📢 曉曉老師聽寫默書專區")
@@ -321,7 +321,6 @@ with tab3:
         selected_lesson_t3 = st.selectbox("🎯 請選擇今天要默書的課文：", ["-- 請選擇課文 --"] + all_lessons_t3, key="select_t3")
         
         if selected_lesson_t3 != "-- 請選擇課文 --":
-            # 🚀 最高安全級別：直讀 GitHub 雲端文字，100% 繞過並免疫前端任何 Text Box 變空的風險
             lesson_text_t3 = load_single_lesson(selected_lesson_t3)
             
             if lesson_text_t3 and lesson_text_t3.strip():
@@ -345,10 +344,10 @@ with tab3:
                         
                         full_lesson_audio = build_full_lesson_wav(pcm_list)
                         if full_lesson_audio:
-                            st.success("🎉 整篇課文聽寫軌合成完畢！撳下方 Play 鍵就會【自動播晒全篇、每句兩次、自動停8秒】！")
+                            st.success("🎉 整篇課文聽寫軌合成完畢！")
                             st.audio(full_lesson_audio, format="audio/wav")
                         else:
-                            st.error("⚠️ 音軌拼接失敗，請檢查課文內容。")
+                            st.error("⚠️ 音軌拼接失敗。")
                 
                 st.markdown("---")
                 st.markdown("#### 🎯 自由控速區：一句句單獨選播")
