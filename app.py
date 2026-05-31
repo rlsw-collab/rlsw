@@ -36,13 +36,11 @@ GH_REPO = "rlsw"
 GH_BRANCH = "main"
 
 # ==========================================================
-# 💾 核心大升級：多用戶「Session 簽名級」實體檔案保險箱
+# 💾 多用戶「Session 簽名級」實體檔案保險箱
 # ==========================================================
 def get_user_vault_path():
-    """獲取當前瀏覽器分頁專屬的快取檔案路徑，100% 杜絕多裝置、多用戶衝突"""
     from streamlit.runtime.scriptrunner import get_script_run_ctx
     ctx = get_script_run_ctx()
-    # 如果拿不到上下文（例如本地啟動初期），給一個預設名稱
     session_id = ctx.session_id if ctx else "default_user"
     return f".tmp_text_{session_id}.txt"
 
@@ -202,11 +200,12 @@ def smart_split_sentence(text, target_len=10):
     return sub_sentences
 
 # ==========================================================
-# 🎨 讀取當前 Session 的檔案暫存
+# 🎨 介面啟動與分流標籤
 # ==========================================================
 st.set_page_config(page_title="智能雲端普通話默書機", page_icon="📖", layout="wide")
-st.title("📖 智能普通話默書機 (Session 絕對隔離版)")
+st.title("📖 智能普通話默書機 (多用戶安全隔離完全體)")
 
+# 讀取現有實體暫存
 current_vault_text = read_from_vault()
 
 tab1, tab2, tab3 = st.tabs([
@@ -232,12 +231,13 @@ with tab1:
                     raw = pytesseract.image_to_string(img, config=r'-l chi_tra+chi_sim --psm 3')
                     full_raw_text += f"\n{raw}\n"
                 
+                # 🤖 唯一直讀寫入實體暫存，代碼中 100% 絕不手動觸摸 st.session_state["t1_field"]
                 ai_out = ai_correct_text_strict(full_raw_text)
                 write_to_vault(ai_out)
-                st.success("✨ 文字已成功寫入保險箱！")
+                st.success("✨ 文字已成功寫入底層保險箱！")
                 st.rerun()
 
-    # 綁定
+    # 顯示時使用老實的 value= 載入，手動打字修改時即時寫回檔案
     t1_input = st.text_area("課文內容 Text Box (可在此進行手動調整)", value=current_vault_text, height=250, key="t1_widget")
     if t1_input != current_vault_text:
         write_to_vault(t1_input)
@@ -259,7 +259,7 @@ with tab1:
                     st.success(msg) if success else st.error(msg)
 
 # ==========================================================
-# 功能二：手動輸入 / 課文修改功能
+# 功能二：手動輸入 / 課文修改功能（🔥 徹底拔除 280 行髒代碼）
 # ==========================================================
 with tab2:
     st.subheader("✍️ 載入、修改與編寫課文")
@@ -272,6 +272,7 @@ with tab2:
             selected_lesson = st.selectbox("📂 選取雲端舊課文：", ["-- 請選擇課文 --"] + all_lessons, key="select_t2")
             if selected_lesson != "-- 請選擇課文 --" and st.button("📥 確認載入選取課文", key="load_btn_t2"):
                 loaded_text = load_single_lesson(selected_lesson)
+                # 🤖 核心修正：只寫實體暫存檔！絕不手動觸碰任何 st.session_state 唯讀元件變數
                 write_to_vault(loaded_text)
                 st.success(f"已成功載入: {selected_lesson}")
                 st.rerun()
@@ -292,6 +293,7 @@ with tab2:
     else:
         st.info("雲端目前沒有已儲存的課文檔。")
 
+    # 顯示時使用老實的 value= 載入，手動打字修改時即時寫回檔案
     t2_input = st.text_area("課文內容 Text Box", value=current_vault_text, height=250, key="t2_widget")
     if t2_input != current_vault_text:
         write_to_vault(t2_input)
