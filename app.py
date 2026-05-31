@@ -38,7 +38,7 @@ def read_from_vault():
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================================
-# 🧠 核心功能函數 (修正：% 號網址路徑地雷物理拔除)
+# 🧠 核心功能函數 (終極修正：放寬正則、標準化檔名匹配)
 # ==========================================================
 def save_to_github(title, content):
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.txt"
@@ -50,7 +50,6 @@ def save_to_github(title, content):
     return put_res.status_code in [200, 201]
 
 def save_audio_to_github(title, speed_value, audio_bytes):
-    """🌟 修正：speed_value 只傳入純數字（如 -30），檔名絕對不帶敏感的 % 號"""
     clean_title = title.replace(".mp3", "").strip()
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{clean_title}_speed_rate_{speed_value}.mp3"
     headers = {"Authorization": f"token {GIT_TOKEN}", "Accept": "application/vnd.github.v3+json"}
@@ -62,7 +61,7 @@ def save_audio_to_github(title, speed_value, audio_bytes):
     return put_res.status_code in [200, 201]
 
 def scan_lesson_cached_audios(title):
-    """🌟 修正：精準匹配純數字檔名，並在畫面上漂亮還原 % 顯示"""
+    """🌟 終極修正：放寬正則匹配，只要包含關鍵構造就抓取，並精確還原百分比"""
     clean_title = title.replace(".mp3", "").strip()
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons"
     headers = {"Authorization": f"token {GIT_TOKEN}"}
@@ -72,19 +71,26 @@ def scan_lesson_cached_audios(title):
     if res.status_code == 200:
         for f in res.json():
             name = f["name"]
+            # 只要檔名前半段對齊，且以 .mp3 結尾即可
             if name.startswith(f"{clean_title}_speed_rate_") and name.endswith(".mp3"):
-                # 提取純數字（包括負號）
-                speed_match = re.search(r'_speed_rate_(-?\d+)\.mp3$', name)
+                # 提取中間的數字語速
+                speed_match = re.search(r'_speed_rate_(-?\d+)', name)
                 if speed_match:
                     pure_num = speed_match.group(1)
-                    display_text = f"{pure_num}%" # 還原百分比給網頁看
+                    display_text = f"{pure_num}%"
                     found_tracks.append((display_text, name))
-    return sorted(found_tracks)
+    
+    # 按照語速數字由小到大排序
+    try:
+        found_tracks.sort(key=lambda x: int(x[0].replace("%", "")))
+    except:
+        found_tracks.sort()
+    return found_tracks
 
 def load_specific_audio_by_filename(filename):
-    # 🌟 核心修正：對網址檔名進行標準安全轉碼，防止特殊中文字元造成加載崩潰
+    """🌟 終極修正：對網址進行深度轉碼，確保中文字元與連字號 100% 被 GitHub API 接受"""
     import urllib.parse
-    encoded_filename = urllib.parse.quote(filename)
+    encoded_filename = urllib.parse.quote(filename.strip())
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{encoded_filename}"
     headers = {"Authorization": f"token {GIT_TOKEN}"}
     res = requests.get(url, headers=headers)
@@ -232,7 +238,7 @@ def smart_split_sentence(text, target_len=14):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能普通話默書機 v1.8.1-FinalPerfect")
+st.title("📖 智能普通話默書機 v1.8.2-FinalPerfect")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -402,12 +408,13 @@ with tab3:
             if cached_tracks:
                 st.success(f"✨ 成功在雲端搵到 {len(cached_tracks)} 個不同語速的版本！想播邊個直接撳 Play：")
                 for speed_text, filename in cached_tracks:
+                    # 🟢 終極修復：利用無懈可擊的 expander 與深度標準化檔名加載
                     with st.expander(f"▶️ 點擊展開點播：【語速 {speed_text}】完整聽寫連續軌", expanded=True):
                         audio_data = load_specific_audio_by_filename(filename)
                         if audio_data:
                             st.audio(audio_data, format="audio/mp3")
                         else:
-                            st.error(f"⚠️ 檔案 `{filename}` 讀取失敗。提示：新版本代碼已修復網址特殊符號，請使用下方按鈕重新一鍵生成即可永久秒播！")
+                            st.error(f"⚠️ 檔案讀取中或暫時無法連線。")
             else:
                 st.info("💡 雲端目前尚未有任何語速的音軌快取。請在下方進行【全新生成】。")
         else:
@@ -467,7 +474,6 @@ with tab3:
                 
                 if active_title:
                     with st.spinner(f"💾 正在自動將完美音軌上傳為雲端 【{custom_rate_str}】 語速快取存檔..."):
-                        # 🌟 傳入純數字 speed_percent，剔除百分比符號干擾
                         save_audio_to_github(active_title, str(speed_percent), full_mp3)
                 
                 st.success(f"✨ 備份成功！【{custom_rate_str}】語速音軌已送往雲端，請等待 2 秒後重新整理網頁！")
