@@ -124,7 +124,6 @@ def ai_correct_text(bad_text):
     except: return bad_text
 
 async def generate_single_audio(text):
-    # 移除標點，讓曉曉專心咬字
     clean_text = re.sub(r'[，。！？；：、「」『』《》·——……]', ' ', text).strip()
     if not clean_text:
         return b""
@@ -138,7 +137,6 @@ async def generate_single_audio(text):
 def build_dictation_wav(audio_bytes, sample_rate=24000):
     if not audio_bytes:
         return b""
-    # 🌟 修正：Edge TTS 輸出的是帶有完整 MP3/WAV 元數據的流，我們安全切除頭部以提取純 PCM
     raw_pcm = audio_bytes[100:] if len(audio_bytes) > 100 else audio_bytes
     bytes_per_sec = sample_rate * 2 
     padding_breath = b"\x00" * int(bytes_per_sec * 2.5) 
@@ -198,14 +196,17 @@ def smart_split_sentence(text, target_len=10):
     return sub_sentences
 
 # ==========================================================
-# 🎨 核心優化：採用全局唯一、絕對不被覆寫的狀態機
+# 🌟 核心防護機制：回呼單向寫入鎖，徹底絕交 Streamlit 自動清空
 # ==========================================================
-st.set_page_config(page_title="智能雲端普通話默書機", page_icon="📖", layout="wide")
-st.title("📖 智能普通話默書機 (雲端網頁版)")
+def sync_t1_to_vault():
+    st.session_state["text_vault"] = st.session_state["t1_editor"]
 
-# 🌟 終極鎖定：不再區分 Tab1/Tab2，全域只有一個核心文字暫存器
-if "global_lesson_text" not in st.session_state:
-    st.session_state["global_lesson_text"] = ""
+def sync_t2_to_vault():
+    st.session_state["text_vault"] = st.session_state["t2_editor"]
+
+# 初始化唯一全域不滅保險箱
+if "text_vault" not in st.session_state:
+    st.session_state["text_vault"] = ""
 
 tab1, tab2, tab3 = st.tabs([
     "📸 1. 批次影相 / 多圖上傳功能", 
@@ -234,13 +235,18 @@ with tab1:
                     img = Image.open(f)
                     raw = pytesseract.image_to_string(img, config=r'-l chi_tra+chi_sim --psm 3')
                     full_raw_text += f"\n{raw}\n"
-                # 🌟 鎖定：直接寫入全域狀態
-                st.session_state["global_lesson_text"] = ai_correct_text(full_raw_text)
+                # 🤖 AI 噴字直接強行鎖進不滅保險箱
+                st.session_state["text_vault"] = ai_correct_text(full_raw_text)
                 st.success("✨ 識別並修正成功！內容已填入下方的 Text Box。")
 
-    # 🌟 綁定全域 Key，確保任何刷新都不會被清空
-    lesson_content_t1 = st.text_area("課文內容 Text Box (可在此進行修改)", value=st.session_state["global_lesson_text"], height=250, key="t1_area")
-    st.session_state["global_lesson_text"] = lesson_content_t1
+    # 🌟 使用解耦監聽：用 value=保險箱 顯示，用 on_change 強制同步回寫
+    lesson_content_t1 = st.text_area(
+        "課文內容 Text Box (可在此進行修改)", 
+        value=st.session_state["text_vault"], 
+        height=250, 
+        key="t1_editor", 
+        on_change=sync_t1_to_vault
+    )
 
     st.subheader("💾 儲存新課文到雲端")
     c1, c2 = st.columns([2, 1])
@@ -250,11 +256,11 @@ with tab1:
         st.write(" ")
         st.write(" ")
         if st.button("💾 確認儲存至 Git", key="save_btn_t1"):
-            if not title_t1.strip() or not lesson_content_t1.strip():
+            if not title_t1.strip() or not st.session_state["text_vault"].strip():
                 st.error("標題和內容不能為空！")
             else:
                 with st.spinner("正在同步至 GitHub..."):
-                    success, msg = save_to_github(title_t1.strip(), lesson_content_t1)
+                    success, msg = save_to_github(title_t1.strip(), st.session_state["text_vault"])
                     st.success(msg) if success else st.error(msg)
 
 # ==========================================================
@@ -272,8 +278,8 @@ with tab2:
             selected_lesson = st.selectbox("📂 雲端 Git 課本庫（選取舊課文進行修改）：", ["-- 請選擇課文 --"] + all_lessons, key="select_lesson_box")
             if selected_lesson != "-- 請選擇課文 --":
                 if st.button("確認載入選取課文", key="load_t2_action"):
-                    # 🌟 鎖定：載入時直接覆蓋全域狀態並觸發重新整理同步
-                    st.session_state["global_lesson_text"] = load_single_lesson(selected_lesson)
+                    # 📂 雲端下載檔案，直接暴力塞入保險箱，然後強制 Rerun 同步
+                    st.session_state["text_vault"] = load_single_lesson(selected_lesson)
                     st.success(f"已成功載入: {selected_lesson}")
                     st.rerun()
                 
@@ -286,16 +292,21 @@ with tab2:
                         success, msg = delete_from_github(selected_lesson)
                         if success:
                             st.success(msg)
-                            st.session_state["global_lesson_text"] = "" 
+                            st.session_state["text_vault"] = "" 
                             time.sleep(0.5)
                             st.rerun()
                         else: st.error(msg)
     else:
         st.info("雲端目前沒有已儲存的課文檔。")
 
-    # 🌟 同步綁定全域變數
-    lesson_content_t2 = st.text_area("課文內容 Text Box", value=st.session_state["global_lesson_text"], height=250, key="t2_area")
-    st.session_state["global_lesson_text"] = lesson_content_t2
+    # 🌟 相同防護解耦：Tab 2 同步監聽
+    lesson_content_t2 = st.text_area(
+        "課文內容 Text Box", 
+        value=st.session_state["text_vault"], 
+        height=250, 
+        key="t2_editor", 
+        on_change=sync_t2_to_vault
+    )
 
     st.subheader("💾 重新儲存/覆蓋課文到雲端")
     c3, c4 = st.columns([2, 1])
@@ -306,11 +317,11 @@ with tab2:
         st.write(" ")
         st.write(" ")
         if st.button("💾 確認儲存至 Git", key="save_btn_t2"):
-            if not title_t2.strip() or not lesson_content_t2.strip():
+            if not title_t2.strip() or not st.session_state["text_vault"].strip():
                 st.error("標題和內容不能為空！")
             else:
                 with st.spinner("正在同步至 GitHub..."):
-                    success, msg = save_to_github(title_t2.strip(), lesson_content_t2)
+                    success, msg = save_to_github(title_t2.strip(), st.session_state["text_vault"])
                     if success:
                         st.success(msg)
                         time.sleep(0.5)
@@ -318,7 +329,7 @@ with tab2:
                     else: st.error(msg)
 
 # ==========================================================
-# 功能三：曉曉老師【聽寫專用】獨立功能
+# 功能三：曉曉老師【聽寫專用】獨立功能（100% 雲端直讀復活）
 # ==========================================================
 with tab3:
     st.subheader("📢 曉曉老師聽寫默書專區")
@@ -328,10 +339,10 @@ with tab3:
         selected_lesson_t3 = st.selectbox("🎯 請選擇今天要默書的課文：", ["-- 請選擇課文 --"] + all_lessons_t3, key="select_t3_player")
         
         if selected_lesson_t3 != "-- 請選擇課文 --":
-            # 🌟 核心修正：點選課文後，即時從雲端獲取最新內容，100% 拒絕 0:00 空音軌！
+            # 🚀 既然前端元件信唔過，我哋在選中課文時，直接去 GitHub 下載最新文字，完全繞過 Text Box 元件！
             lesson_text_t3 = load_single_lesson(selected_lesson_t3)
             
-            if lesson_text_t3.strip():
+            if lesson_text_t3 and lesson_text_t3.strip():
                 paragraphs_t3 = [p.strip() for p in re.split(r'\n\s*\n', lesson_text_t3) if p.strip()]
                 all_sentences = []
                 for p_text in paragraphs_t3:
@@ -345,7 +356,6 @@ with tab3:
                     with st.spinner("曉曉老師正在全速為整篇課文打包音軌，請稍候..."):
                         pcm_list = []
                         for sentence in all_sentences:
-                            # 確保句子有內容才去生成
                             if sentence.strip():
                                 base_audio = asyncio.run(generate_single_audio(sentence))
                                 if base_audio:
@@ -375,6 +385,6 @@ with tab3:
                                         dictation_audio = build_dictation_wav(base_audio)
                                         st.audio(dictation_audio, format="audio/wav")
             else:
-                st.warning("⚠️ 該雲端課文內容為空，請先前往功能二確認內容。")
+                st.warning("⚠️ 該雲端課文內容為空，請回功能二確認。")
     else:
         st.info("雲端目前沒有課文，請先去功能一或功能二儲存課文。")
