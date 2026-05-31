@@ -124,41 +124,44 @@ def build_dictation_wav(audio_bytes, sample_rate=24000):
 def ai_correct_text(bad_text):
     if not GITHUB_TOKEN: return bad_text
     try:
-        # 🛠️ 【第一層：Python 物理去噪過濾器】
-        # 逐行檢查，如果發現該行主要是由英文字母和數字組成（拼音行），直接在送給 AI 前過濾掉
-        clean_lines = []
-        for line in bad_text.split('\n'):
-            stripped = line.strip()
-            if not stripped:
-                continue
-            # 計算該行入面英文字母和數字的比例
-            alpha_num_count = sum(1 for c in stripped if c.isalnum() and not '\u4e00' <= c <= '\u9fff')
-            total_count = len(stripped)
+        # 🛠️ 【第一層：純中文與標點物理提取器】
+        # 建立一個正則表達式，只允許：中文字符 [\u4e00-\u9fff] 和 常見中文標點符號
+        # 所有英文字母 a-z, A-Z 和數字 0-9 會被徹底抹殺
+        cleaned_chars = []
+        for char in bad_text:
+            # 檢查是否為中文字
+            is_chinese = '\u4e00' <= char <= '\u9fff'
+            # 檢查是否為中文常用標點或換行
+            is_punc_or_nl = char in '，。！？；：、「」『』《》·——……\n '
             
-            # 如果一行入面超過 60% 都是英文字母或數字，判定為普通話拼音行，直接丟棄
-            if total_count > 0 and (alpha_num_count / total_count) > 0.60:
-                continue
-            clean_lines.append(line)
+            if is_chinese or is_punc_or_nl:
+                cleaned_chars.append(char)
         
-        filtered_text = "\n".join(clean_lines)
+        filtered_text = "".join(cleaned_chars)
+        
+        # 再次清洗：將連續的多個空格縮減為單個空格，保持版面整潔
+        filtered_text = re.sub(r' +', ' ', filtered_text)
 
-        # 🧠 【第二層：GPT-4o 情感修復大腦】
+        # 🧠 【第二層：GPT-4o 課文重構大腦】
         client = ChatCompletionsClient(endpoint="https://models.inference.ai.azure.com", credential=AzureKeyCredential(GITHUB_TOKEN))
         
         prompt = """
         你是一個專門修復小學課文 OCR 錯誤的頂級專家。
         
         【目前狀況】：
-        傳進來的文本已經過濾掉了大部分的獨立拼音行，但可能還殘留了一些零碎的拼音字母（如 Jan chi, zang su5）或者錯位符號。
+        輸入的文本已經通過 Python 物理清除了所有干擾的拼音英文字母和數字，只剩下了核心的中文字和部分標點。但裡面依然存在不少 OCR 錯字或不通順的地方。
         
         【你的核心任務】：
-        1. 徹底刪除文本中殘留的所有英文字母、拼音和無意義符號，一個不留。
-        2. 根據上下文，把因 OCR 辨識殘缺的中文字（例如將 "決地" 修正為 "決定"、修復 "喬布斯"、"愛德華·腓納" 等人名）完全還原成通順、100% 精準的繁體中文課文原文。
-        3. 必須嚴格按照原文分段（這是一篇關於「堅持與成功」、提及喬布斯發明觸控手機、誠納醫生發明牛痘疫苗、以及長跑比賽的課文）。
-        4. 絕對不要包含任何拼音、Markdown 語法（如粗體或引號標籤）、註解、或你的額外解釋，直接輸出修復後的純課文。
+        1. 請根據上下文，將這些殘缺的中文字還原成 100% 通順、精準、符合小學課本邏輯的【繁體中文課文原文】。
+        2. 修復重點字詞：
+           - 修正錯字（例如將 "決地" 修正為 "決定"、"要我们" 修正為 "要我們"）。
+           - 完美還原人名和品牌：例如 "美國蘋果公司"、"史提夫·喬布斯"（原文字幕有誤字）、"英國醫生愛德華·詹納"（原文錯成了誹納/誠納，請統一修正為正確的「愛德華·詹納」）。
+           - 還原古語名言：「鍥而不捨，金石可鏤。」（原文錯成了外而不拾、金石可煞，請依據上下文「不斷雕刻而不放棄」100% 還原這句正確名言！）
+        3. 必須嚴格按照原文含意分成正確的段落。
+        4. 絕對不要包含任何拼音、Markdown 語法、註解、或你的額外解釋，直接輸出修復後的純課文。
         """
         
-        response = client.complete(messages=[{"role": "user", "content": prompt + "\n過濾後文本:\n" + filtered_text}], model="gpt-4o")
+        response = client.complete(messages=[{"role": "user", "content": prompt + "\n乾淨中文殘卷:\n" + filtered_text}], model="gpt-4o")
         return response.choices[0].message.content.strip()
     except: return bad_text
 
