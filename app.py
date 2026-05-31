@@ -6,8 +6,6 @@ import requests
 from PIL import Image
 import io
 import streamlit as st
-from azure.ai.inference import ChatCompletionsClient  
-from azure.core.credentials import AzureKeyCredential
 import edge_tts
 import asyncio
 
@@ -16,6 +14,8 @@ import asyncio
 # ==========================================================
 AI_TOKEN = st.secrets["AI_TOKEN"] if "AI_TOKEN" in st.secrets else ""
 GIT_TOKEN = st.secrets["GIT_TOKEN"] if "GIT_TOKEN" in st.secrets else ""
+GEMINI_TOKEN = st.secrets["GEMINI_TOKEN"] if "GEMINI_TOKEN" in st.secrets else ""
+
 GH_USER = "rlsw-collab"
 GH_REPO = "rlsw"
 GH_BRANCH = "main"
@@ -38,7 +38,7 @@ def read_from_vault():
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================================
-# 🧠 核心功能函數 
+# 🧠 核心功能函數 (隆重引入 Gemini 視覺神經中樞)
 # ==========================================================
 def save_to_github(title, content):
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.txt"
@@ -108,45 +108,43 @@ def convert_image_to_base64(uploaded_file):
     image.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-def ai_vision_pipeline(base64_images_list):
-    """🌟 革命性萬能解法：精準分步管道流！徹底封殺大模型的幻想與故事調包病灶"""
+def gemini_vision_extract(base64_images_list):
+    """🤖 真正切換至 Gemini 2.5/Flash 視覺大腦：具備極強的繁體字及抗拼音干擾能力！"""
     if not base64_images_list: return ""
+    if not GEMINI_TOKEN: return "錯誤：未在 Secrets 中設定 GEMINI_TOKEN！"
     try:
-        client = ChatCompletionsClient(endpoint="https://models.inference.ai.azure.com", credential=AzureKeyCredential(AI_TOKEN))
+        # 使用 Google 官方原生 Gemini REST API，無需額外裝大依賴，部署極速穩定
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
+        headers = {"Content-Type": "application/json"}
         
-        # 🟢 第一步：純視覺字形抓取（嚴禁思考、只准照抄）
-        step1_prompt = """你是一個沒有靈魂的【純文字照抄掃描儀】。
-        圖片是包含拼音的小學課本。漢字的上方有小字拼音。
-        【死命令】：
-        1. 眼睛只看【大字漢字】，完全無視、漏掉、不看所有的小字拼音和圓圈標號！
-        2. 從左到右、從上到下，把看到的大字繁體漢字一字不漏地抄寫下來。
-        3. 絕對不准根據看到的關鍵字（如愛迪生、項羽、半杯水）去網絡搜索或自己編造任何一句故事、論文、背景或過渡句！
-        4. 即使字跡模糊，也只能寫出看清的部分，絕不進行任何擴寫！不要任何 Markdown 標籤。"""
-        
-        msg_s1 = [{"type": "text", "text": step1_prompt}]
+        # 建立專屬 Gemini 的鋼鐵謄寫指令
+        prompt_text = """你現在是一個100%精準、只會看圖抄寫的繁體中文打字掃描儀。
+        你看到的圖片是小學課本。漢字的正上方疊加了密密麻麻的普通話拼音。
+
+        【🚫 鋼鐵死命令】：
+        1. 你的眼睛必須完全無視所有拼音字母、英文字元和小圓圈數字標號。
+        2. 盯緊圖片中的【大字漢字】，一字不漏、按照自然段落順序將漢字抄寫下來。
+        3. 絕對禁止任何二次創作、聯想或編造！原圖有甚麼字就寫甚麼字，絕對不准加入任何網上的企業招聘面試故事、愛爾蘭哲人或蘇格拉底的故事！
+        4. 保持全形標點符號與自然段落換行。直接輸出最純淨的繁體中文，不要包含任何 Markdown 標籤或你的合理解釋。"""
+
+        parts = [{"text": prompt_text}]
         for b64 in base64_images_list:
-            msg_s1.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
+            parts.append({
+                "inline_data": {
+                    "mime_type": "image/jpeg",
+                    "data": b64
+                }
+            })
             
-        res_s1 = client.complete(messages=[{"role": "user", "content": msg_s1}], model="gpt-4o")
-        raw_scanned_text = res_s1.choices[0].message.content.strip()
+        payload = {"contents": [{"parts": parts}]}
+        res = requests.post(url, headers=headers, json=payload)
         
-        # 🟢 第二步：鋼鐵文本校對（只准修正錯別字，100%禁止編造故事）
-        step2_prompt = """你是一個精準的【繁體中文錯字修正器】。
-        下面是用戶上傳課本圖片後，機器初步識別出來的破碎文字。
-        
-        【你的唯一權限】：
-        1. 糾正文字中因為排版造成的明顯錯別字或斷句錯誤（例如：將『泰代』糾正為『秦代』，『珀燈』糾正為『電燈』）。
-        2. 100% 保持原本的句子結構、長度、體裁和段落！
-        3. 【最高警告】：傳進來的文本裡【絕對沒有】任何關於『面試招聘、應徵者寫論文』的故事！如果文本裡出現了，說明是前置機器產生了幻覺，請你立即將所有面試、招聘、論文、考生等編造的雞湯情節【徹底刪除】，只保留關於課文本身的真跡內容！
-        4. 直接輸出修正後的純課文繁體中文，不要任何解釋或 Markdown 標籤。"""
-        
-        res_s2 = client.complete(
-            messages=[{"role": "user", "content": step2_prompt + "\n" + raw_scanned_text}],
-            model="gpt-4o"
-        )
-        return res_s2.choices[0].message.content.strip()
+        if res.status_code == 200:
+            return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        else:
+            return f"Gemini API 報錯: {res.text}"
     except Exception as e:
-        return f"自動辨識出錯: {str(e)}"
+        return f"Gemini 辨識發生異常: {str(e)}"
 
 def convert_punctuation_to_words(text):
     text = text.replace("，", "逗號").replace(",", "逗號")
@@ -198,13 +196,13 @@ def smart_split_sentence(text, target_len=14):
             current_char_count += 1
             
         if char in strong_ends or (current_char_count >= target_len and char in split_chars):
-            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」").replace("【感引】", "！」")
+            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」").replace("【感引】", "！”")
             if chunk_restore.strip(): sub_sentences.append(chunk_restore.strip())
             current_chunk = ""
             current_char_count = 0
             
     if current_chunk.strip():
-        chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」").replace("【感引】", "！」")
+        chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」").replace("【感引】", "！”")
         sub_sentences.append(chunk_restore.strip())
         
     final_sentences = []
@@ -219,7 +217,7 @@ def smart_split_sentence(text, target_len=14):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能萬能普通話默書機 v1.3.0-Universal")
+st.title("📖 智能普通話默書機 v1.6.0-GeminiPowered")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -238,39 +236,39 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ==========================================================
-# 🔓 解鎖後的萬能通用介面
+# 🔓 解鎖後的完整介面 (由 Gemini 大腦強勢驅動 OCR)
 # ==========================================================
 current_text = read_from_vault()
 text_hash = str(len(current_text)) + "_" + str(hash(current_text))
 
-tab1, tab2, tab3 = st.tabs(["📸 1. 萬能智能影相", "✍️ 2. 雲端管理與手動修改", "📢 3. 曉曉老師聽寫專區"])
+tab1, tab2, tab3 = st.tabs(["📸 1. Gemini 核心智能影相辨識", "✍️ 2. 雲端舊課文載入與修改", "📢 3. 曉曉老師聽寫專區"])
 
 with tab1:
-    st.subheader("📸 拍下任何課本圖片（自動剔除拼音、防加戲）")
+    st.subheader("📸 拍下課本圖片（由 Gemini 大腦強勢過濾拼音、100%防加戲）")
     files = st.file_uploader("請上傳或拍攝課文圖片（可多選組合）：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="up_t1")
     if files:
         cols = st.columns(min(len(files), 5))
         for i, f in enumerate(files): cols[i % 5].image(Image.open(f), use_container_width=True)
             
-        if st.button("🚀 啟動萬能管道流：精準看圖謄寫", key="ocr_btn_t1"):
-            with st.spinner("🔮 雙層 AI 管道流正全速協作：第一層抓取大字、第二層抹除幻想校對中..."):
+        if st.button("🚀 執行 Gemini 視覺直讀識別（秒殺一切拼音雜訊）", key="ocr_btn_t1"):
+            with st.spinner("🔮 Google Gemini 視覺大腦正全速透視大字中，請稍候..."):
                 b64_list = [convert_image_to_base64(f) for f in files]
-                # 🤖 調用萬能雙層過濾管道流，徹底擺脫寫死課文的尷尬！
-                clean_extracted_text = ai_vision_pipeline(b64_list)
+                # 🟢 震撼換腦：這裡直接呼叫真正的 Gemini 視覺接口！
+                clean_extracted_text = gemini_vision_extract(b64_list)
                 write_to_vault(clean_extracted_text)
-                st.success("✨ 原文純淨文字已 100% 完美鎖定！你可以進行微調並儲存！")
+                st.success("✨ Gemini 完美原文已成功解鎖，請在下方查看！")
                 st.rerun()
                 
-    t1 = st.text_area("課文內容 Text Box (AI 識別後可在此進行最終手動檢查調整)", value=current_text, height=250, key=f"t1_{text_hash}")
+    t1 = st.text_area("課文內容 Text Box (AI 識別後可在此進行檢查微調)", value=current_text, height=250, key=f"t1_{text_hash}")
     if t1 != current_text: write_to_vault(t1)
 
-    st.subheader("💾 將新課文永久儲存到雲端")
+    st.subheader("💾 將新識別的課文儲存到雲端")
     c1, c2 = st.columns([3, 1])
     with c1: title_t1 = st.text_input("請輸入課文標題：", placeholder="例如：半杯水", key="title_t1")
     with c2:
         st.write(" ")
         st.write(" ")
-        if st.button("💾 確認儲存文字至 Git", key="save_btn_t1"):
+        if st.button("💾 確認儲存至 Git", key="save_btn_t1"):
             if not title_t1.strip() or not current_text.strip(): st.error("標題和內容不能為空！")
             else:
                 with st.spinner("同步中..."):
