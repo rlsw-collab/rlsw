@@ -106,7 +106,15 @@ def load_single_lesson(title):
 def ai_correct_text(bad_text):
     try:
         client = ChatCompletionsClient(endpoint="https://models.inference.ai.azure.com", credential=AzureKeyCredential(AI_TOKEN))
-        prompt = """你是一個專門修復小學課文 OCR 錯誤的頂級專家。請將文本中所有的普通話拼音和英文字母徹底刪除，將中文字 100% 還原成精準、通順、符合小學課本邏輯的【繁體中文課文原文】。絕對不要包含任何拼音、Markdown 語法標籤、註解或額外解釋，直接輸出修復後的純課文。"""
+        prompt = """
+        你是一個專門修復小學課文 OCR 錯誤的頂級專家。
+        傳進來的文本可能夾雜了大量的普通話拼音和殘缺錯字。
+        
+        【你的核心任務】：
+        1. 徹底刪除文本中所有的拼音、英文字母及無意義雜質號。
+        2. 根據上下文，將中文字 100% 還原成精準、通順、符合小學課本邏輯的【繁體中文課文原文】。
+        3. 絕對不要包含任何拼音、Markdown 語法標籤、註解或你的額外解釋，直接輸出修復後的純課文。
+        """
         response = client.complete(messages=[{"role": "user", "content": prompt + "\n" + bad_text}], model="gpt-4o")
         return response.choices[0].message.content.strip()
     except: return bad_text
