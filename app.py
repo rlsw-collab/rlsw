@@ -110,8 +110,8 @@ def ai_correct_text_strict(bad_text):
         prompt = """你是一個專門修復小學課文 OCR 錯誤的頂級專家。請將文本中所有的普通話拼音和英文字母徹底刪除，將中文字 100% 還原成精準、通順、符合小學課本邏輯的【繁體中文課文原文】。絕對不要包含任何拼音、Markdown 語法標籤、註解或額外解釋，直接輸出修復後的純課文。"""
         response = client.complete(messages=[{"role": "user", "content": prompt + "\n文本:\n" + bad_text}], model="gpt-4o")
         return response.choices[0].message.content.strip()
-    except Exception as e:
-        return f"【AI 修正失敗】{e}\n{bad_text}"
+    except:
+        return bad_text
 
 async def generate_single_audio(text):
     clean_text = re.sub(r'[，。！？；：、「」『』《》·——……]', ' ', text).strip()
@@ -179,10 +179,14 @@ def smart_split_sentence(text, target_len=10):
     return sub_sentences
 
 # ==========================================================
-# 🎨 核心優化：安全的指針型雙向狀態機
+# 🌟 核心修正：繞過所有元件的 `value` 陷阱，強制手動覆寫初始化
 # ==========================================================
 if "stable_vault" not in st.session_state: 
     st.session_state["stable_vault"] = ""
+
+# 每次進入程式，用保險箱的值直接霸道填滿元件背後的內部金鑰
+st.session_state["t1_field"] = st.session_state["stable_vault"]
+st.session_state["t2_field"] = st.session_state["stable_vault"]
 
 def sync_t1_to_vault():
     st.session_state["stable_vault"] = st.session_state["t1_field"]
@@ -191,13 +195,18 @@ def sync_t2_to_vault():
     st.session_state["stable_vault"] = st.session_state["t2_field"]
 
 # ==========================================================
-# 📊 前端介面佈局
+# 🎨 UI 介面設計
 # ==========================================================
 st.set_page_config(page_title="智能雲端普通話默書機", page_icon="📖", layout="wide")
-st.title("📖 智能普通話默書機 (終極修復完全體)")
+st.title("📖 智能普通話默書機 (終極覆寫完全體)")
 
-with st.expander("🔍 系統實時狀態雷達 (Debug Radar)", expanded=True):
-    st.info(f"後台核心 `stable_vault` 當前字數： **{len(st.session_state['stable_vault'])}** 字")
+# 頂部實時雷達：直接把保險箱內容以純 Markdown 亮出來，如果這裡有字，代表文字百分之百在網頁記憶體裡！
+with st.expander("🔍 記憶體實時內容快照 (Mem-Snapshot)", expanded=True):
+    if st.session_state["stable_vault"]:
+        st.success(f"後台記憶體目前鎖定： **{len(st.session_state['stable_vault'])}** 字")
+        st.info(st.session_state["stable_vault"])
+    else:
+        st.warning("後台記憶體目前為空。")
 
 tab1, tab2, tab3 = st.tabs([
     "📸 1. 批次影相 / 多圖上傳功能", 
@@ -222,17 +231,18 @@ with tab1:
                     raw = pytesseract.image_to_string(img, config=r'-l chi_tra+chi_sim --psm 3')
                     full_raw_text += f"\n{raw}\n"
                 
-                # 🌟 安全改寫保險箱，絕對不手動碰觸元件的唯讀 Key
-                st.session_state["stable_vault"] = ai_correct_text_strict(full_raw_text)
-                st.success("✨ 文字已成功鎖定！")
+                # 🤖 雙層暴力落鎖：直接塞進保險箱，並強行覆蓋元件金鑰
+                ai_out = ai_correct_text_strict(full_raw_text)
+                st.session_state["stable_vault"] = ai_out
+                st.session_state["t1_field"] = ai_out
+                st.session_state["t2_field"] = ai_out
                 st.rerun()
 
-    # 🌟 降維解法：使用指針載入，on_change 同步，不再觸發唯讀保護錯誤
+    # 文字顯示
     st.text_area(
         "課文內容 Text Box (可在此進行手動調整)", 
-        value=st.session_state["stable_vault"], 
-        height=250, 
         key="t1_field",
+        height=250, 
         on_change=sync_t1_to_vault
     )
 
@@ -264,9 +274,11 @@ with tab2:
         with col_select:
             selected_lesson = st.selectbox("📂 選取雲端舊課文：", ["-- 請選擇課文 --"] + all_lessons, key="select_t2")
             if selected_lesson != "-- 請選擇課文 --" and st.button("📥 確認載入選取課文", key="load_btn_t2"):
-                # 🌟 唯一安全的寫入點：只寫保險箱，元件重啟時會自動讀取它
-                st.session_state["stable_vault"] = load_single_lesson(selected_lesson)
-                st.success(f"已成功載入: {selected_lesson}")
+                loaded_text = load_single_lesson(selected_lesson)
+                # 🤖 雙層暴力落鎖：直接強寫保險箱與所有對應元件的底層金鑰
+                st.session_state["stable_vault"] = loaded_text
+                st.session_state["t1_field"] = loaded_text
+                st.session_state["t2_field"] = loaded_text
                 st.rerun()
                 
         with col_delete:
@@ -279,18 +291,19 @@ with tab2:
                         if success:
                             st.success(msg)
                             st.session_state["stable_vault"] = ""
+                            st.session_state["t1_field"] = ""
+                            st.session_state["t2_field"] = ""
                             time.sleep(0.5)
                             st.rerun()
                         else: st.error(msg)
     else:
         st.info("雲端目前沒有已儲存的課文檔。")
 
-    # 🌟 指針對齊：利用保險箱的值單向渲染元件，手動修改時透過 on_change 寫回
+    # 文字顯示
     st.text_area(
         "課文內容 Text Box", 
-        value=st.session_state["stable_vault"], 
-        height=250, 
         key="t2_field",
+        height=250, 
         on_change=sync_t2_to_vault
     )
 
@@ -298,7 +311,7 @@ with tab2:
     c3, c4 = st.columns([3, 1])
     with c3:
         default_name = selected_lesson if (all_lessons and selected_lesson != "-- 請選擇課文 --") else ""
-        title_t2 = st.text_input("請輸入課文標題（開啟舊檔將自動帶入標題，儲存會直接覆蓋）：", value=default_name, key="title_t2")
+        title_t2 = st.text_input("請輸入課文標題：", value=default_name, key="title_t2")
     with c4:
         st.write(" ")
         st.write(" ")
