@@ -38,7 +38,7 @@ def read_from_vault():
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================================
-# 🧠 核心功能函數 (終極修正：放寬正則、標準化檔名匹配)
+# 🧠 核心功能函數 (升級：引入萬無一失的 Raw 網址直通串流)
 # ==========================================================
 def save_to_github(title, content):
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.txt"
@@ -61,7 +61,6 @@ def save_audio_to_github(title, speed_value, audio_bytes):
     return put_res.status_code in [200, 201]
 
 def scan_lesson_cached_audios(title):
-    """🌟 終極修正：放寬正則匹配，只要包含關鍵構造就抓取，並精確還原百分比"""
     clean_title = title.replace(".mp3", "").strip()
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons"
     headers = {"Authorization": f"token {GIT_TOKEN}"}
@@ -71,32 +70,24 @@ def scan_lesson_cached_audios(title):
     if res.status_code == 200:
         for f in res.json():
             name = f["name"]
-            # 只要檔名前半段對齊，且以 .mp3 結尾即可
             if name.startswith(f"{clean_title}_speed_rate_") and name.endswith(".mp3"):
-                # 提取中間的數字語速
                 speed_match = re.search(r'_speed_rate_(-?\d+)', name)
                 if speed_match:
                     pure_num = speed_match.group(1)
                     display_text = f"{pure_num}%"
                     found_tracks.append((display_text, name))
-    
-    # 按照語速數字由小到大排序
     try:
         found_tracks.sort(key=lambda x: int(x[0].replace("%", "")))
     except:
         found_tracks.sort()
     return found_tracks
 
-def load_specific_audio_by_filename(filename):
-    """🌟 終極修正：對網址進行深度轉碼，確保中文字元與連字號 100% 被 GitHub API 接受"""
+def generate_raw_github_url(filename):
+    """🌟 革命性升級：繞過一切 API，將中文字檔名進行標準網址編碼，生成直接串流下載連結"""
     import urllib.parse
     encoded_filename = urllib.parse.quote(filename.strip())
-    url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{encoded_filename}"
-    headers = {"Authorization": f"token {GIT_TOKEN}"}
-    res = requests.get(url, headers=headers)
-    if res.status_code == 200:
-        return base64.b64decode(res.json()["content"])
-    return None
+    # 建立 GitHub Raw 原生串流直達網址
+    return f"https://raw.githubusercontent.com/{GH_USER}/{GH_REPO}/{GH_BRANCH}/lessons/{encoded_filename}"
 
 def delete_from_github(title):
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.txt"
@@ -238,7 +229,7 @@ def smart_split_sentence(text, target_len=14):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能普通話默書機 v1.8.2-FinalPerfect")
+st.title("📖 智能普通話默書機 v1.8.3-StreamingPro")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -346,6 +337,7 @@ with tab2:
                     st.session_state["instant_audio_bytes"] = None
                     st.success("成功同步至 GitHub 雲端！")
 
+# --- Tab 3: 聽寫專區 (🚀 Raw 網址直通秒播版) ---
 with tab3:
     st.subheader("📢 曉曉老師聽寫默書專區")
     
@@ -408,13 +400,10 @@ with tab3:
             if cached_tracks:
                 st.success(f"✨ 成功在雲端搵到 {len(cached_tracks)} 個不同語速的版本！想播邊個直接撳 Play：")
                 for speed_text, filename in cached_tracks:
-                    # 🟢 終極修復：利用無懈可擊的 expander 與深度標準化檔名加載
                     with st.expander(f"▶️ 點擊展開點播：【語速 {speed_text}】完整聽寫連續軌", expanded=True):
-                        audio_data = load_specific_audio_by_filename(filename)
-                        if audio_data:
-                            st.audio(audio_data, format="audio/mp3")
-                        else:
-                            st.error(f"⚠️ 檔案讀取中或暫時無法連線。")
+                        # 🟢 終極修正：生成無懈可擊的 Raw 網址，直接塞給播放器，徹底解決中文字加載失敗！
+                        raw_stream_url = generate_raw_github_url(filename)
+                        st.audio(raw_stream_url, format="audio/mp3")
             else:
                 st.info("💡 雲端目前尚未有任何語速的音軌快取。請在下方進行【全新生成】。")
         else:
@@ -424,7 +413,7 @@ with tab3:
         st.markdown(f"#### 🚀 產生新快取：全篇自動連續聽寫（當前設定語速 {custom_rate_str}）")
         
         if st.session_state["instant_audio_bytes"] is not None:
-            st.warning(f"🔥 剛生成完畢！下方為【{custom_rate_str}】即時緩衝音軌（後台同步至雲端中，稍後刷新即可收入上方快取庫）：")
+            st.warning(f"🔥 剛生成完畢！下方為【{custom_rate_str}】即時緩衝音軌（已同步至雲端，稍後刷新即可收入上方快取庫）：")
             st.audio(st.session_state["instant_audio_bytes"], format="audio/mp3")
 
         if st.button("🏁 一鍵產生【整篇連續默書】音軌", key="play_all_btn"):
