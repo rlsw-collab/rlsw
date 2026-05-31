@@ -273,3 +273,21 @@ with tab3:
                 
                 if mp3_list:
                     full_mp3 = b"".join(mp3_list)
+                    st.success("🎉 終極音軌 100% 成功爆發！曉曉老師會親口讀出「第X段」和所有標點符號，語速極慢，且每句讀完均會完美原地停頓 8 秒！")
+                    st.audio(full_mp3, format="audio/mp3")
+                else: st.error("⚠️ 音軌生成失敗。")
+                
+        st.markdown("---")
+        st.markdown("#### 🎯 自由控速區：一句句單獨加操")
+        for idx, sentence in enumerate(all_sentences):
+            if sentence.strip():
+                col_text, col_audio = st.columns([4, 2])
+                with col_text: st.write(f"第 {idx+1} 句： `{sentence}`")
+                with col_audio:
+                    if st.button(f"📢 聽寫第 {idx+1} 句", key=f"single_btn_{idx}"):
+                        with st.spinner("合成中..."):
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+                            audio_raw = loop.run_until_complete(generate_audio_clean(sentence))
+                            loop.close()
+                            if audio_raw: st.audio(build_dictation_mp3_with_real_silence(audio_raw), format="audio/mp3")
