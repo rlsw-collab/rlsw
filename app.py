@@ -17,7 +17,6 @@ import asyncio
 if os.path.exists(r'C:\Program Files\Tesseract-OCR\tesseract.exe'):
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-# 🔑 雙 Token 雲端/本地自動配對
 AI_TOKEN = ""
 GIT_TOKEN = ""
 
@@ -105,20 +104,14 @@ def load_single_lesson(title):
     return ""
 
 def ai_correct_text_strict(bad_text):
-    if not AI_TOKEN: 
-        print("❌ AI_TOKEN 缺失")
-        return "【除錯】未讀取到 AI_TOKEN"
+    if not AI_TOKEN: return bad_text
     try:
-        print(f" LOG: 準備發送給 Azure AI 的原始字數: {len(bad_text)}")
         client = ChatCompletionsClient(endpoint="https://models.inference.ai.azure.com", credential=AzureKeyCredential(AI_TOKEN))
         prompt = """你是一個專門修復小學課文 OCR 錯誤的頂級專家。請將文本中所有的普通話拼音和英文字母徹底刪除，將中文字 100% 還原成精準、通順、符合小學課本邏輯的【繁體中文課文原文】。絕對不要包含任何拼音、Markdown 語法標籤、註解或額外解釋，直接輸出修復後的純課文。"""
         response = client.complete(messages=[{"role": "user", "content": prompt + "\n文本:\n" + bad_text}], model="gpt-4o")
-        res_text = response.choices[0].message.content.strip()
-        print(f" LOG: Azure AI 成功返回！字數: {len(res_text)}")
-        return res_text
+        return response.choices[0].message.content.strip()
     except Exception as e:
-        print(f"❌ Azure AI 呼叫崩潰原因: {e}")
-        return f"【AI 呼叫失敗】原因: {e}"
+        return f"【AI 修正失敗】{e}\n{bad_text}"
 
 async def generate_single_audio(text):
     clean_text = re.sub(r'[，。！？；：、「」『』《》·——……]', ' ', text).strip()
@@ -186,30 +179,26 @@ def smart_split_sentence(text, target_len=10):
     return sub_sentences
 
 # ==========================================================
-# 🎨 數據追蹤監聽區
+# 🎨 數據初始化與雙向綁定監聽
 # ==========================================================
-def handle_t1_change():
-    print(f"📝 [監聽日誌] Tab 1 打字更新！新內容長度: {len(st.session_state['t1_field'])}")
-    st.session_state["stable_vault"] = st.session_state["t1_field"]
-
-def handle_t2_change():
-    print(f"📝 [監聽日誌] Tab 2 打字更新！新內容長度: {len(st.session_state['t2_field'])}")
-    st.session_state["stable_vault"] = st.session_state["t2_field"]
-
-# 初始化唯一不滅保險箱
 if "stable_vault" not in st.session_state: 
-    print("🆕 [系統初始化] 建立核心保險箱 stable_vault")
     st.session_state["stable_vault"] = ""
 
+# 🔥 核心修正：將文字框的輸入直接與唯一狀態進行強制綁定
+def sync_t1_to_vault():
+    st.session_state["stable_vault"] = st.session_state["t1_field"]
+
+def sync_t2_to_vault():
+    st.session_state["stable_vault"] = st.session_state["t2_field"]
+
 # ==========================================================
-# 📊 【除錯專用】前端頂部雷達（直接印在網頁最頂端，一目了然）
+# 📊 前端雷達面版
 # ==========================================================
 st.set_page_config(page_title="智能雲端普通話默書機", page_icon="📖", layout="wide")
-st.title("📖 智能普通話默書機 (日誌除錯版)")
+st.title("📖 智能普通話默書機")
 
-with st.expander("🔍 系統實時全域狀態雷達 (Debug Log Dashboard)", expanded=True):
-    st.warning(f"目前後台保險箱 `stable_vault` 內文字長度： {len(st.session_state['stable_vault'])} 字")
-    st.text(f"【保險箱目前文字快照】\n{st.session_state['stable_vault']}")
+with st.expander("🔍 系統實時狀態雷達 (Debug Radar)", expanded=True):
+    st.info(f"後台核心 `stable_vault` 當前字數： **{len(st.session_state['stable_vault'])}** 字")
 
 tab1, tab2, tab3 = st.tabs([
     "📸 1. 批次影相 / 多圖上傳功能", 
@@ -234,20 +223,21 @@ with tab1:
                     raw = pytesseract.image_to_string(img, config=r'-l chi_tra+chi_sim --psm 3')
                     full_raw_text += f"\n{raw}\n"
                 
-                print(f" OCR 提取到的原始字串長度: {len(full_raw_text)}")
-                ai_out = ai_correct_text_strict(full_raw_text)
-                st.session_state["stable_vault"] = ai_out
-                print(f"保險箱經已成功被 OCR 改寫為: {len(st.session_state['stable_vault'])} 字")
-                st.success("✨ 文字已成功鎖定在下方文字框！")
+                # 寫入保險箱
+                st.session_state["stable_vault"] = ai_correct_text_strict(full_raw_text)
+                # 🔥 強制將畫面的元件值與保險箱同步，防止慘白
+                st.session_state["t1_field"] = st.session_state["stable_vault"]
+                st.session_state["t2_field"] = st.session_state["stable_vault"]
+                st.success("✨ 文字已成功鎖定！")
                 st.rerun()
 
-    # 文字顯示與回寫
+    # 文字顯示與回寫（使用強制對齊）
     st.text_area(
         "課文內容 Text Box (可在此進行手動調整)", 
         value=st.session_state["stable_vault"], 
         height=250, 
         key="t1_field",
-        on_change=handle_t1_change
+        on_change=sync_t1_to_vault
     )
 
     st.subheader("💾 儲存新課文到雲端")
@@ -278,8 +268,11 @@ with tab2:
         with col_select:
             selected_lesson = st.selectbox("📂 選取雲端舊課文：", ["-- 請選擇課文 --"] + all_lessons, key="select_t2")
             if selected_lesson != "-- 請選擇課文 --" and st.button("📥 確認載入選取課文", key="load_btn_t2"):
-                st.session_state["stable_vault"] = load_single_lesson(selected_lesson)
-                print(f"📥 [載入日誌] 從雲端讀取到 《{selected_lesson}》 ，長度: {len(st.session_state['stable_vault'])} 字")
+                loaded_text = load_single_lesson(selected_lesson)
+                # 🌟 強制全面對齊刷新所有 session 變數
+                st.session_state["stable_vault"] = loaded_text
+                st.session_state["t1_field"] = loaded_text
+                st.session_state["t2_field"] = loaded_text
                 st.success(f"已成功載入: {selected_lesson}")
                 st.rerun()
                 
@@ -293,19 +286,21 @@ with tab2:
                         if success:
                             st.success(msg)
                             st.session_state["stable_vault"] = ""
+                            st.session_state["t1_field"] = ""
+                            st.session_state["t2_field"] = ""
                             time.sleep(0.5)
                             st.rerun()
                         else: st.error(msg)
     else:
         st.info("雲端目前沒有已儲存的課文檔。")
 
-    # 同步綁定
+    # 同步綁定（使用強制對齊）
     st.text_area(
         "課文內容 Text Box", 
         value=st.session_state["stable_vault"], 
         height=250, 
         key="t2_field",
-        on_change=handle_t2_change
+        on_change=sync_t2_to_vault
     )
 
     st.subheader("💾 重新儲存/覆蓋課文到雲端")
