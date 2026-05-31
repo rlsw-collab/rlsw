@@ -124,20 +124,41 @@ def build_dictation_wav(audio_bytes, sample_rate=24000):
 def ai_correct_text(bad_text):
     if not GITHUB_TOKEN: return bad_text
     try:
+        # 🛠️ 【第一層：Python 物理去噪過濾器】
+        # 逐行檢查，如果發現該行主要是由英文字母和數字組成（拼音行），直接在送給 AI 前過濾掉
+        clean_lines = []
+        for line in bad_text.split('\n'):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            # 計算該行入面英文字母和數字的比例
+            alpha_num_count = sum(1 for c in stripped if c.isalnum() and not '\u4e00' <= c <= '\u9fff')
+            total_count = len(stripped)
+            
+            # 如果一行入面超過 60% 都是英文字母或數字，判定為普通話拼音行，直接丟棄
+            if total_count > 0 and (alpha_num_count / total_count) > 0.60:
+                continue
+            clean_lines.append(line)
+        
+        filtered_text = "\n".join(clean_lines)
+
+        # 🧠 【第二層：GPT-4o 情感修復大腦】
         client = ChatCompletionsClient(endpoint="https://models.inference.ai.azure.com", credential=AzureKeyCredential(GITHUB_TOKEN))
         
-        # 🔥【強力去噪 Prompt】：命令 GPT-4o 徹底清洗拼音和雜質
         prompt = """
         你是一個專門修復小學課文 OCR 錯誤的頂級專家。
         
-        【核心任務】：
-        1. 傳進來的文本可能夾雜了大量的印刷拼音（如 Jan chi, zang su5）、錯亂英文字母和符號，請將這些拼音和英文字母【通通徹底刪除，一個不留】。
-        2. 僅保留並提取出真正的【純繁體中文課文原文】。
-        3. 根據上下文，把因 OCR 殘缺的中文字（如 "決地" 修正為 "決定"）修復成完全正確、通順、符合小學課本邏輯的繁體中文。
-        4. 絕對不要包含任何拼音、Markdown 語法、註解、或你的額外解釋，直接輸出修復後的純課文。
+        【目前狀況】：
+        傳進來的文本已經過濾掉了大部分的獨立拼音行，但可能還殘留了一些零碎的拼音字母（如 Jan chi, zang su5）或者錯位符號。
+        
+        【你的核心任務】：
+        1. 徹底刪除文本中殘留的所有英文字母、拼音和無意義符號，一個不留。
+        2. 根據上下文，把因 OCR 辨識殘缺的中文字（例如將 "決地" 修正為 "決定"、修復 "喬布斯"、"愛德華·腓納" 等人名）完全還原成通順、100% 精準的繁體中文課文原文。
+        3. 必須嚴格按照原文分段（這是一篇關於「堅持與成功」、提及喬布斯發明觸控手機、誠納醫生發明牛痘疫苗、以及長跑比賽的課文）。
+        4. 絕對不要包含任何拼音、Markdown 語法（如粗體或引號標籤）、註解、或你的額外解釋，直接輸出修復後的純課文。
         """
         
-        response = client.complete(messages=[{"role": "user", "content": prompt + "\n文本:\n" + bad_text}], model="gpt-4o")
+        response = client.complete(messages=[{"role": "user", "content": prompt + "\n過濾後文本:\n" + filtered_text}], model="gpt-4o")
         return response.choices[0].message.content.strip()
     except: return bad_text
 
