@@ -134,95 +134,48 @@ def ai_correct_text_strict(bad_text):
     except:
         return bad_text
 
-async def generate_single_audio(text):
+# 🌟 雲端非同步音軌修正：改為標準、最穩定的 Edge-TTS 聲音導出
+async def generate_single_audio_fixed(text):
     clean_text = re.sub(r'[，。！？；：、「」『』《》·——……]', ' ', text).strip()
-    if not clean_text: return b""
-    communicate = edge_tts.Communicate(clean_text, "zh-CN-XiaoxiaoNeural", rate="-5%")
-    audio_data = b""
-    async for chunk in communicate.stream():
-        if chunk["type"] == "audio": audio_data += chunk["data"]
-    return audio_data
-
-def build_dictation_wav(audio_bytes, sample_rate=24000):
-    if not audio_bytes: return b""
-    raw_pcm = audio_bytes[100:] if len(audio_bytes) > 100 else audio_bytes
-    bytes_per_sec = sample_rate * 2 
-    padding_breath = b"\x00" * int(bytes_per_sec * 2.5) 
-    padding_write = b"\x00" * int(bytes_per_sec * 8.0)   
-    combined_pcm = raw_pcm + padding_breath + raw_pcm + padding_write
-    
-    header = b"RIFF"
-    header += (len(combined_pcm) + 36).to_bytes(4, "little")
-    header += b"WAVEfmt "
-    header += (16).to_bytes(4, "little")
-    header += (1).to_bytes(2, "little")       
-    header += (sample_rate).to_bytes(4, "little") 
-    header += (bytes_per_sec).to_bytes(4, "little")
-    header += (2).to_bytes(2, "little")
-    header += (16).to_bytes(2, "little")      
-    header += b"data"
-    header += (len(combined_pcm)).to_bytes(4, "little")
-    return header + combined_pcm
-
-def build_full_lesson_wav(pcm_list, sample_rate=24000):
-    full_pcm = b""
-    for pcm in pcm_list:
-        if len(pcm) > 44: full_pcm += pcm[44:] 
-    if not full_pcm: return b""
-    header = b"RIFF"
-    header += (len(full_pcm) + 36).to_bytes(4, "little")
-    header += b"WAVEfmt "
-    header += (16).to_bytes(4, "little")
-    header += (1).to_bytes(2, "little")       
-    header += (sample_rate).to_bytes(4, "little") 
-    header += (sample_rate * 2).to_bytes(4, "little")
-    header += (2).to_bytes(2, "little")
-    header += (16).to_bytes(2, "little")      
-    header += b"data"
-    header += (len(full_pcm)).to_bytes(4, "little")
-    return header + full_pcm
+    if not clean_text: 
+        return b""
+    try:
+        # 直接導出標準網頁支援的 MP3 流，唔好在雲端手撕 PCM 費事出錯
+        communicate = edge_tts.Communicate(clean_text, "zh-CN-XiaoxiaoNeural", rate="-5%")
+        audio_data = b""
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio": 
+                audio_data += chunk["data"]
+        return audio_data
+    except Exception as e:
+        st.error(f"TTS 雲端通訊失敗: {e}")
+        return b""
 
 def smart_split_sentence(text, target_len=10):
-    # 將所有常見的繁網全形標點統統納入切割雷達，確保每句長度適中，微軟引擎絕對不罷工
     strong_ends = ['。', '！', '？', '；', '：', '\n']
     split_chars = ['，', '、', ',']
     sub_sentences = []
     current_chunk = ""
     current_char_count = 0
-    
     for char in text:
         current_chunk += char
-        if char not in (strong_ends + split_chars + ['「', '」', '《', '》', '“', '”', '·']):
+        if char not in (strong_ends + split_chars + ['「', '」', '《', '裝', '“', '”', '·']):
             current_char_count += 1
-            
-        # 只要遇到強句尾，或者字數夠長遇到逗號，就立刻切斷成獨立短句
         if char in strong_ends or (current_char_count >= target_len and char in split_chars):
-            if current_chunk.strip():
-                sub_sentences.append(current_chunk.strip())
+            if current_chunk.strip(): sub_sentences.append(current_chunk.strip())
             current_chunk = ""
             current_char_count = 0
-            
-    if current_chunk.strip():
-        sub_sentences.append(current_chunk.strip())
+    if current_chunk.strip(): sub_sentences.append(current_chunk.strip())
     return sub_sentences
 
 # ==========================================================
-# 🎨 介面啟動與大標題版本號
+# 🎨 UI 介面
 # ==========================================================
 st.set_page_config(page_title="智能雲端普通話默書機", page_icon="📖", layout="wide")
-st.title("📖 智能普通話默書機　v1.0.５")
+st.title("📖 智能普通話默書機 v1.0.5-AudioDebug")
 
-# 讀取現有實體暫存
 current_vault_text = read_from_vault()
 text_hash = str(len(current_vault_text)) + "_" + str(hash(current_vault_text))
-
-# 📡 重新裝回：DEBUG 雷達快照
-with st.expander("🔍 實時保險箱核心快照 (DEBUG 雷達)", expanded=True):
-    if current_vault_text:
-        st.success(f"⚡ 後台實實安全暫存檔目前鎖定： **{len(current_vault_text)}** 字")
-        st.info(current_vault_text)
-    else:
-        st.warning("⚠️ 後台實時暫存目前為空。")
 
 tab1, tab2, tab3 = st.tabs([
     "📸 1. 批次影相 / 多圖上傳功能", 
@@ -249,10 +202,9 @@ with tab1:
                 
                 ai_out = ai_correct_text_strict(full_raw_text)
                 write_to_vault(ai_out)
-                st.success("✨ 文字已成功寫入底層保險箱！")
+                st.success("✨ 文字已成功寫入保險箱！")
                 st.rerun()
 
-    # 🔥 核心降維打擊：利用動態 key=text_hash，當文字有變動時，強制 Streamlit 銷毀並重新生成全新文字框，徹底消滅空白 Bug
     t1_input = st.text_area("課文內容 Text Box (可在此進行手動調整)", value=current_vault_text, height=250, key=f"t1_widget_{text_hash}")
     if t1_input != current_vault_text:
         write_to_vault(t1_input)
@@ -307,7 +259,6 @@ with tab2:
     else:
         st.info("雲端目前沒有已儲存的課文檔。")
 
-    # 🔥 同步強刷機制
     t2_input = st.text_area("課文內容 Text Box", value=current_vault_text, height=250, key=f"t2_widget_{text_hash}")
     if t2_input != current_vault_text:
         write_to_vault(t2_input)
@@ -334,7 +285,7 @@ with tab2:
                     else: st.error(msg)
 
 # ==========================================================
-# 功能三：曉曉老師【聽寫專用】獨立功能
+# 功能三：曉曉老師【聽寫專用】（直接解綁非同步、用原始 MP3 測試）
 # ==========================================================
 with tab3:
     st.subheader("📢 曉曉老師聽寫默書專區")
@@ -354,35 +305,35 @@ with tab3:
                 
                 st.markdown(f"### 📖 當前準備默書：《{selected_lesson_t3}》")
                 
-                st.markdown("---")
-                st.markdown("#### 🚀 終極懶人包：全篇自動連續聽寫")
-                if st.button("🏁 一鍵產生【整篇連續默書】音軌", key="play_all_btn"):
-                    with st.spinner("曉曉老師正在全速為整篇課文打包音軌，請稍候..."):
-                        pcm_list = []
-                        for sentence in all_sentences:
-                            if sentence.strip():
-                                base_audio = asyncio.run(generate_single_audio(sentence))
-                                if base_audio:
-                                    pcm_list.append(build_dictation_wav(base_audio))
-                        
-                        full_lesson_audio = build_full_lesson_wav(pcm_list)
-                        if full_lesson_audio:
-                            st.success("🎉 整篇課文聽寫軌合成完畢！")
-                            st.audio(full_lesson_audio, format="audio/wav")
-                        else:
-                            st.error("⚠️ 音軌拼接失敗。")
+                # 📡 除錯雷達：直接檢查有沒有切出句子
+                st.info(f"📊 系統成功將本課文切碎成： **{len(all_sentences)}** 個聽寫句子。")
                 
                 st.markdown("---")
-                st.markdown("#### 🎯 自由控速區：一句句單獨選播")
+                st.markdown("#### 🚀 自由控速區：一句句單獨選播")
+                
+                # 🌟 先用單句測試，直接繞過複雜的 PCM 轉碼，直接播放微軟原始流！
                 for idx, sentence in enumerate(all_sentences):
                     if sentence.strip():
                         col_text, col_audio = st.columns([4, 2])
-                        with col_text: st.write(f"第 {idx+1} 句： `{sentence}`")
+                        with col_text: 
+                            st.write(f"第 {idx+1} 句： `{sentence}`")
                         with col_audio:
                             if st.button(f"📢 聽寫第 {idx+1} 句", key=f"single_btn_{idx}"):
-                                with st.spinner("合成中..."):
-                                    base_audio = asyncio.run(generate_single_audio(sentence))
-                                    if base_audio: st.audio(build_dictation_wav(base_audio), format="audio/wav")
+                                with st.spinner("微軟曉曉合成中..."):
+                                    # 🌟 用最穩健的事件循環抓取聲音
+                                    try:
+                                        loop = asyncio.new_event_loop()
+                                        asyncio.set_event_loop(loop)
+                                        raw_mp3_stream = loop.run_until_complete(generate_single_audio_fixed(sentence))
+                                        loop.close()
+                                        
+                                        if raw_mp3_stream:
+                                            st.write(f"✅ 成功抓取數據：{len(raw_mp3_stream)} 字節")
+                                            st.audio(raw_mp3_stream, format="audio/mp3")
+                                        else:
+                                            st.error("❌ 抓取到的聲音數據為 0。")
+                                    except Exception as ex:
+                                        st.error(f"事件循環崩潰: {ex}")
             else:
                 st.warning("⚠️ 該雲端課文內容為空。")
     else:
