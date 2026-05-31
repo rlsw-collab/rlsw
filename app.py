@@ -104,7 +104,6 @@ def load_single_lesson(title):
     return base64.b64decode(res.json()["content"]).decode("utf-8") if res.status_code == 200 else ""
 
 def ai_correct_text(bad_text):
-    """🌟 終極重磅更新：極限鎖定原文字形，禁止任何白話文翻譯、意譯與改寫！"""
     try:
         client = ChatCompletionsClient(endpoint="https://models.inference.ai.azure.com", credential=AzureKeyCredential(AI_TOKEN))
         prompt = """你是一個專門修復小學課文 OCR 錯誤的頂級嚴格專家。
@@ -115,7 +114,7 @@ def ai_correct_text(bad_text):
         2. 徹底剔除所有拼音、英文字母及無意義的圓圈數字標號（例如刪除 ①、②、③ 等）。
         3. 根據 OCR 殘缺字進行字形修正，輸出 100% 精準的【繁體中文課文原文】。
         4. 嚴格做到「不新增任何課文沒有的句子、不重組段落、不作任何意譯與演繹」。
-        5. 絕對不要包含任何 Markdown 語法標籤、註解或你的額外解釋，直接輸出修復後的純淨課文。"""
+        5. 絕對不要包含 any Markdown 語法標籤、註解或你的額外解釋，直接輸出修復後的純淨課文。"""
         
         response = client.complete(messages=[{"role": "user", "content": prompt + "\n" + bad_text}], model="gpt-4o")
         return response.choices[0].message.content.strip()
@@ -171,13 +170,13 @@ def smart_split_sentence(text, target_len=14):
             current_char_count += 1
             
         if char in strong_ends or (current_char_count >= target_len and char in split_chars):
-            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "結構。」").replace("【感引】", "！」")
+            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」").replace("【感引】", "！」")
             if chunk_restore.strip(): sub_sentences.append(chunk_restore.strip())
             current_chunk = ""
             current_char_count = 0
             
     if current_chunk.strip():
-        chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」").replace("【感引】", "！」")
+        chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」").replace("【感引】", "結構！」")
         sub_sentences.append(chunk_restore.strip())
         
     final_sentences = []
@@ -189,11 +188,33 @@ def smart_split_sentence(text, target_len=14):
     return final_sentences
 
 # ==========================================================
-# 🎨 UI 介面佈局
+# 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能普通話默書機 v1.2.3-Final")
+st.title("📖 智能普通話默書機 v1.2.4-Secure")
 
+# 🟢 核心防護：建立 Session 密碼狀態驗證機制
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+# 如果未驗證，強制彈出密碼框輸入框，物理阻斷下方所有功能代碼
+if not st.session_state["authenticated"]:
+    st.subheader("🔐 安全密碼驗證")
+    pwd_input = st.text_input("請輸入專屬訪問密碼：", type="password")
+    if st.button("確認登入"):
+        if pwd_input == "royroy":
+            st.session_state["authenticated"] = True
+            st.success("🔓 驗證成功！正在解鎖默書機...")
+            time.sleep(0.5)
+            st.rerun()
+        else:
+            st.error("❌ 密碼錯誤，拒絕訪問！")
+    # 未通過密碼驗證時，物理終止整個 Script 運行
+    st.stop()
+
+# ==========================================================
+# 🔓 以下為解鎖後的完整功能代碼
+# ==========================================================
 current_text = read_from_vault()
 text_hash = str(len(current_text)) + "_" + str(hash(current_text))
 
@@ -265,7 +286,7 @@ with tab2:
         st.write(" ")
         st.write(" ")
         if st.button("💾 確認儲存至 Git", key="save_btn_t2"):
-            if not title_t2.strip() or not current_text.strip(): st.error("標題和內容不能為空！")
+            if not title_t2.strip() or not current_text.strip(): st.error("標題和內容 cannot be 空！")
             else:
                 with st.spinner("同步中..."):
                     if save_to_github(title_t2.strip(), current_text): st.success("成功同步至 GitHub 雲端！")
