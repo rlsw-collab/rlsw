@@ -125,7 +125,18 @@ def ai_correct_text(bad_text):
     if not GITHUB_TOKEN: return bad_text
     try:
         client = ChatCompletionsClient(endpoint="https://models.inference.ai.azure.com", credential=AzureKeyCredential(GITHUB_TOKEN))
-        prompt = "你是一個專門修復小學課文 OCR 錯誤的專家。請將其100%還原成原本準確、通順的繁體中文課文原文。絕對不要夾帶任何 Markdown、註解或額外解釋。"
+        
+        # 🔥【強力去噪 Prompt】：命令 GPT-4o 徹底清洗拼音和雜質
+        prompt = """
+        你是一個專門修復小學課文 OCR 錯誤的頂級專家。
+        
+        【核心任務】：
+        1. 傳進來的文本可能夾雜了大量的印刷拼音（如 Jan chi, zang su5）、錯亂英文字母和符號，請將這些拼音和英文字母【通通徹底刪除，一個不留】。
+        2. 僅保留並提取出真正的【純繁體中文課文原文】。
+        3. 根據上下文，把因 OCR 殘缺的中文字（如 "決地" 修正為 "決定"）修復成完全正確、通順、符合小學課本邏輯的繁體中文。
+        4. 絕對不要包含任何拼音、Markdown 語法、註解、或你的額外解釋，直接輸出修復後的純課文。
+        """
+        
         response = client.complete(messages=[{"role": "user", "content": prompt + "\n文本:\n" + bad_text}], model="gpt-4o")
         return response.choices[0].message.content.strip()
     except: return bad_text
