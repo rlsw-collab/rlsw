@@ -13,9 +13,12 @@ import asyncio
 # ==========================================================
 # ⚙️ 雲端與本地自動適應設定專區
 # ==========================================================
-# 檢查是否在 Streamlit 雲端運行，如果是，Tesseract 通常需要透過 packages.txt 安裝
+# 智能探測：如果是在本地 Windows 就指定路徑；如果在雲端 Linux 就直接調用系統內置命令
 if os.path.exists(r'C:\Program Files\Tesseract-OCR\tesseract.exe'):
     pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+else:
+    # 雲端 Linux 環境下，系統會自動將 tesseract 加進環境變數，這裡不需手動指定
+    pass
 
 # 🔑 自動讀取本地或環境變數中的 GitHub Token
 GITHUB_TOKEN = ""
