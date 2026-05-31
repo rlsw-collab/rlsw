@@ -36,6 +36,29 @@ GH_REPO = "rlsw"
 GH_BRANCH = "main"
 
 # ==========================================================
+# 💾 核心大升級：多用戶「Session 簽名級」實體檔案保險箱
+# ==========================================================
+def get_user_vault_path():
+    """獲取當前瀏覽器分頁專屬的快取檔案路徑，100% 杜絕多裝置、多用戶衝突"""
+    from streamlit.runtime.scriptrunner import get_script_run_ctx
+    ctx = get_script_run_ctx()
+    # 如果拿不到上下文（例如本地啟動初期），給一個預設名稱
+    session_id = ctx.session_id if ctx else "default_user"
+    return f".tmp_text_{session_id}.txt"
+
+def write_to_vault(text):
+    vault_path = get_user_vault_path()
+    with open(vault_path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+def read_from_vault():
+    vault_path = get_user_vault_path()
+    if os.path.exists(vault_path):
+        with open(vault_path, "r", encoding="utf-8") as f:
+            return f.read()
+    return ""
+
+# ==========================================================
 # 🧠 後台核心函數
 # ==========================================================
 
@@ -179,34 +202,12 @@ def smart_split_sentence(text, target_len=10):
     return sub_sentences
 
 # ==========================================================
-# 🌟 核心修正：繞過所有元件的 `value` 陷阱，強制手動覆寫初始化
-# ==========================================================
-if "stable_vault" not in st.session_state: 
-    st.session_state["stable_vault"] = ""
-
-# 每次進入程式，用保險箱的值直接霸道填滿元件背後的內部金鑰
-st.session_state["t1_field"] = st.session_state["stable_vault"]
-st.session_state["t2_field"] = st.session_state["stable_vault"]
-
-def sync_t1_to_vault():
-    st.session_state["stable_vault"] = st.session_state["t1_field"]
-
-def sync_t2_to_vault():
-    st.session_state["stable_vault"] = st.session_state["t2_field"]
-
-# ==========================================================
-# 🎨 UI 介面設計
+# 🎨 讀取當前 Session 的檔案暫存
 # ==========================================================
 st.set_page_config(page_title="智能雲端普通話默書機", page_icon="📖", layout="wide")
-st.title("📖 智能普通話默書機 (終極覆寫完全體)")
+st.title("📖 智能普通話默書機 (Session 絕對隔離版)")
 
-# 頂部實時雷達：直接把保險箱內容以純 Markdown 亮出來，如果這裡有字，代表文字百分之百在網頁記憶體裡！
-with st.expander("🔍 記憶體實時內容快照 (Mem-Snapshot)", expanded=True):
-    if st.session_state["stable_vault"]:
-        st.success(f"後台記憶體目前鎖定： **{len(st.session_state['stable_vault'])}** 字")
-        st.info(st.session_state["stable_vault"])
-    else:
-        st.warning("後台記憶體目前為空。")
+current_vault_text = read_from_vault()
 
 tab1, tab2, tab3 = st.tabs([
     "📸 1. 批次影相 / 多圖上傳功能", 
@@ -231,20 +232,15 @@ with tab1:
                     raw = pytesseract.image_to_string(img, config=r'-l chi_tra+chi_sim --psm 3')
                     full_raw_text += f"\n{raw}\n"
                 
-                # 🤖 雙層暴力落鎖：直接塞進保險箱，並強行覆蓋元件金鑰
                 ai_out = ai_correct_text_strict(full_raw_text)
-                st.session_state["stable_vault"] = ai_out
-                st.session_state["t1_field"] = ai_out
-                st.session_state["t2_field"] = ai_out
+                write_to_vault(ai_out)
+                st.success("✨ 文字已成功寫入保險箱！")
                 st.rerun()
 
-    # 文字顯示
-    st.text_area(
-        "課文內容 Text Box (可在此進行手動調整)", 
-        key="t1_field",
-        height=250, 
-        on_change=sync_t1_to_vault
-    )
+    # 綁定
+    t1_input = st.text_area("課文內容 Text Box (可在此進行手動調整)", value=current_vault_text, height=250, key="t1_widget")
+    if t1_input != current_vault_text:
+        write_to_vault(t1_input)
 
     st.subheader("💾 儲存新課文到雲端")
     c1, c2 = st.columns([3, 1])
@@ -254,11 +250,12 @@ with tab1:
         st.write(" ")
         st.write(" ")
         if st.button("💾 確認儲存至 Git", key="save_btn_t1"):
-            if not title_t1.strip() or not st.session_state["stable_vault"].strip():
+            latest_text = read_from_vault()
+            if not title_t1.strip() or not latest_text.strip():
                 st.error("標題和內容不能為空！")
             else:
                 with st.spinner("同步中..."):
-                    success, msg = save_to_github(title_t1.strip(), st.session_state["stable_vault"])
+                    success, msg = save_to_github(title_t1.strip(), latest_text)
                     st.success(msg) if success else st.error(msg)
 
 # ==========================================================
@@ -275,10 +272,8 @@ with tab2:
             selected_lesson = st.selectbox("📂 選取雲端舊課文：", ["-- 請選擇課文 --"] + all_lessons, key="select_t2")
             if selected_lesson != "-- 請選擇課文 --" and st.button("📥 確認載入選取課文", key="load_btn_t2"):
                 loaded_text = load_single_lesson(selected_lesson)
-                # 🤖 雙層暴力落鎖：直接強寫保險箱與所有對應元件的底層金鑰
-                st.session_state["stable_vault"] = loaded_text
-                st.session_state["t1_field"] = loaded_text
-                st.session_state["t2_field"] = loaded_text
+                write_to_vault(loaded_text)
+                st.success(f"已成功載入: {selected_lesson}")
                 st.rerun()
                 
         with col_delete:
@@ -290,22 +285,16 @@ with tab2:
                         success, msg = delete_from_github(selected_lesson)
                         if success:
                             st.success(msg)
-                            st.session_state["stable_vault"] = ""
-                            st.session_state["t1_field"] = ""
-                            st.session_state["t2_field"] = ""
+                            write_to_vault("")
                             time.sleep(0.5)
                             st.rerun()
                         else: st.error(msg)
     else:
         st.info("雲端目前沒有已儲存的課文檔。")
 
-    # 文字顯示
-    st.text_area(
-        "課文內容 Text Box", 
-        key="t2_field",
-        height=250, 
-        on_change=sync_t2_to_vault
-    )
+    t2_input = st.text_area("課文內容 Text Box", value=current_vault_text, height=250, key="t2_widget")
+    if t2_input != current_vault_text:
+        write_to_vault(t2_input)
 
     st.subheader("💾 重新儲存/覆蓋課文到雲端")
     c3, c4 = st.columns([3, 1])
@@ -316,11 +305,12 @@ with tab2:
         st.write(" ")
         st.write(" ")
         if st.button("💾 確認儲存至 Git", key="save_btn_t2"):
-            if not title_t2.strip() or not st.session_state["stable_vault"].strip():
+            latest_text_t2 = read_from_vault()
+            if not title_t2.strip() or not latest_text_t2.strip():
                 st.error("標題和內容不能為空！")
             else:
                 with st.spinner("同步中..."):
-                    success, msg = save_to_github(title_t2.strip(), st.session_state["stable_vault"])
+                    success, msg = save_to_github(title_t2.strip(), latest_text_t2)
                     if success:
                         st.success(msg)
                         time.sleep(0.5)
