@@ -57,7 +57,7 @@ def save_to_github(title, content):
         sha = res.json().get("sha")
     content_b64 = base64.b64encode(content.encode("utf-8")).decode("utf-8")
     data = {
-        "message": f"🤖 智能默書機：儲儲/更新課文 {title}",
+        "message": f"🤖 智能默書機：儲存/更新課文 {title}",
         "content": content_b64,
         "branch": GH_BRANCH
     }
@@ -163,7 +163,7 @@ def build_full_lesson_wav(pcm_list, sample_rate=24000):
     return header + full_pcm
 
 def smart_split_sentence(text, target_len=10):
-    strong_ends = ['。', '！', '？', '——', '……']
+    strong_ends = ['。', '！', ' Nut', '？', '——', '……']
     split_chars = ['，', '、', '；', '：']
     sub_sentences = []
     current_chunk = ""
@@ -180,15 +180,15 @@ def smart_split_sentence(text, target_len=10):
     return sub_sentences
 
 # ==========================================================
-# 🎨 經典回歸：單一文字框不打架核心 UI
+# 🎨 終極物理綁定 UI 介面
 # ==========================================================
 st.set_page_config(page_title="智能雲端普通話默書機", page_icon="📖", layout="wide")
-st.title("📖 智能普通話默書機 (雲端回歸初心版)")
+st.title("📖 智能普通話默書機 (雙向強綁定版)")
 
+# 🌟 唯一全域保險箱，且與 st.text_area 完美共生
 if "stable_text" not in st.session_state: 
     st.session_state["stable_text"] = ""
 
-# --- 🚀 第一層：雲端課本庫與上傳區並排 ---
 col_left, col_right = st.columns([1, 1])
 
 with col_left:
@@ -208,6 +208,7 @@ with col_left:
                     st.rerun()
                     
         if selected_lesson != "-- 請選擇 --" and st.button("📥 確認載入選取課文"):
+            # 直接塞進雙向綁定的保險箱
             st.session_state["stable_text"] = load_single_lesson(selected_lesson)
             st.rerun()
     else:
@@ -215,7 +216,7 @@ with col_left:
 
 with col_right:
     st.markdown("### 📸 2. 批次影相 / 多圖上傳")
-    uploaded_files = st.file_uploader("請上傳或拍攝課文圖片（可多選）：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="up_core")
+    uploaded_files = st.file_uploader("請上傳或拍攝課文圖片（可多選）：", type=["png", "jpg", "jpeg"], key="up_core")
     
     if uploaded_files:
         st.write("🖼️ 圖片預覽：")
@@ -230,16 +231,16 @@ with col_right:
                     img = Image.open(f)
                     raw = pytesseract.image_to_string(img, config=r'-l chi_tra+chi_sim --psm 3')
                     full_raw_text += f"\n{raw}\n"
+                # 直接塞進雙向綁定的保險箱，拿掉干擾的 st.rerun()
                 st.session_state["stable_text"] = ai_correct_text_strict(full_raw_text)
-                st.rerun()
+                st.success("✨ 文字已成功鎖定在下方文字框！")
 
-# --- 🚀 第二層：唯一的、絕對不會消失的 Text Box 專區 ---
+# --- 🚀 關鍵核心：將 key 直連 "stable_text"，拿掉反向覆蓋的變數賦值 ---
 st.markdown("---")
-st.markdown("### ✍️ 3. 課文內容中心 (打字/AI辨識/載入皆匯聚於此)")
-lesson_content = st.text_area("課文內容 (可在此進行最後修改)", value=st.session_state["stable_text"], height=250, key="one_and_only_textarea")
-st.session_state["stable_text"] = lesson_content
+st.markdown("### ✍️ 3. 課文內容中心")
+st.text_area("課文內容 (可在此進行手動修改或確認)", height=250, key="stable_text")
 
-# 儲存按鈕
+# 儲存專區
 c_title, c_save = st.columns([3, 1])
 with c_title:
     default_name = selected_lesson if (all_lessons and selected_lesson != "-- 請選擇 --") else ""
@@ -248,28 +249,30 @@ with c_save:
     st.write(" ")
     st.write(" ")
     if st.button("💾 儲存/更新課文到雲端 Git"):
-        if not title_input.strip() or not lesson_content.strip():
+        current_text = st.session_state["stable_text"]
+        if not title_input.strip() or not current_text.strip():
             st.error("標題和內容不能為空！")
         else:
             with st.spinner("同步中..."):
-                success, msg = save_to_github(title_input.strip(), lesson_content)
+                success, msg = save_to_github(title_input.strip(), current_text)
                 st.success(msg) if success else st.error(msg)
                 time.sleep(0.5)
                 st.rerun()
 
-# --- 🚀 第三層：曉曉老師【聽寫專用】標準音軌 ---
-if lesson_content.strip():
+# --- 🚀 音軌生成直接調用雙向變數 ---
+current_stable_text = st.session_state["stable_text"]
+if current_stable_text.strip():
     st.markdown("---")
     st.markdown("### 📢 4. 曉曉老師【聽寫專用】標準聽寫音軌")
     
-    paragraphs = [p.strip() for p in re.split(r'\n\s*\n', lesson_content) if p.strip()]
+    paragraphs = [p.strip() for p in re.split(r'\n\s*\n', current_stable_text) if p.strip()]
     all_sentences = []
     for p_text in paragraphs:
         all_sentences.extend(smart_split_sentence(p_text))
         
     col_all, _ = st.columns([2, 2])
     with col_all:
-        if st.button("🏁 一鍵產生【整篇連續默書】音軌 (每句兩次，自動停8秒)"):
+        if st.button("🏁 一鍵產生【整篇連續默書】音軌"):
             with st.spinner("曉曉老師正在打包整篇音軌..."):
                 pcm_list = []
                 for sentence in all_sentences:
@@ -279,7 +282,7 @@ if lesson_content.strip():
                             pcm_list.append(build_dictation_wav(base_audio))
                 full_audio = build_full_lesson_wav(pcm_list)
                 if full_audio:
-                    st.success("🎉 整篇連續音軌合成成功！點擊下方 Play 開始默書：")
+                    st.success("🎉 整篇連續音軌合成成功！")
                     st.audio(full_audio, format="audio/wav")
                     
     st.markdown("#### 🎯 單句加操區")
