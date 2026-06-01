@@ -181,11 +181,12 @@ def convert_punctuation_to_words_bilingual(text, mode="中文"):
         text = text.replace(";", " semicolon ").replace("；", " semicolon ")
         text = text.replace(":", " colon ").replace("：", " colon ")
         
+        # 🟢 完美切換為 Quotation Mark
         quote_count = 0
         def replace_quote(match):
             nonlocal quote_count
             quote_count += 1
-            return " open inverted commas " if quote_count % 2 != 0 else " close inverted commas "
+            return " open quotation mark " if quote_count % 2 != 0 else " close quotation mark "
         text = re.sub(r'["“”]', replace_quote, text)
         
     return text
@@ -196,7 +197,6 @@ async def generate_audio_clean_raw_bilingual(speak_text, custom_rate="-20%", mod
         if str(custom_rate).strip() == "0%":
             custom_rate = "+0%"
             
-        # 🔥 終極修復：撤換被封殺的 Zari，改用 100% 穩定的 Aria 老師！
         voice_model = "zh-CN-XiaoxiaoNeural" if mode == "中文" else "en-US-AriaNeural"
         communicate = edge_tts.Communicate(speak_text, voice_model, rate=custom_rate)
         audio_data = b""
@@ -204,7 +204,7 @@ async def generate_audio_clean_raw_bilingual(speak_text, custom_rate="-20%", mod
             if chunk["type"] == "audio": audio_data += chunk["data"]
         return audio_data
     except Exception as e:
-        print(f"TTS 發音生成報錯: {str(e)}") # 保留報錯資訊
+        print(f"TTS 發音生成報錯: {str(e)}") 
         return b""
 
 def generate_true_mp3_silence(seconds):
@@ -258,7 +258,7 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能中英雙語默書聽寫機 v1.9.6")
+st.title("📖 智能中英雙語默書聽寫機 v1.9.7")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -373,8 +373,8 @@ with tab2:
 with tab3:
     st.subheader("📢 智能雙語聽寫默書專區")
     
-    # 🔥 更新 UI 選項名稱為 Aria 老師
-    play_mode = st.radio("請指定本課發音語系規格：", ["🇨🇳 普通話模式 (曉曉老師)", "🇬🇧 英語模式 (Aria老師 - Full stop版)"], horizontal=True)
+    # 🔥 更新 UI 顯示名稱
+    play_mode = st.radio("請指定本課發音語系規格：", ["🇨🇳 普通話模式 (曉曉老師)", "🇬🇧 英語模式 (Aria老師 - Full stop & Quotation版)"], horizontal=True)
     active_lang = "中文" if "普通話" in play_mode else "英文"
     
     lessons_t3 = load_all_lessons()
@@ -471,6 +471,7 @@ with tab3:
                 if active_lang == "中文":
                     blocks = [b.strip() for b in re.split(r'(開書名號|關書名號|逗號|句號|感嘆號|問號|分號|冒號|頓號|開引號|關引號)', text_with_breathes) if b.strip()]
                 else:
+                    # 🟢 完美將 open quotation mark 和 close quotation mark 加入英文防斷網
                     blocks = [text_with_breathes.strip()]
                 
                 sentence_audio_stream = b""
