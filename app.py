@@ -66,6 +66,14 @@ def scan_lesson_cached_audios(title):
     headers = {"Authorization": f"token {GIT_TOKEN}"}
     res = requests.get(url, headers=headers)
     
+    # 🌟 建立速度對照鏡，將舊代碼背後的數字實時翻譯成中文 UI 詞彙
+    text_mapping = {
+        "0": "快",
+        "-20": "正常",
+        "-30": "慢",
+        "-40": "好慢"
+    }
+    
     found_tracks = [] 
     if res.status_code == 200:
         for f in res.json():
@@ -74,13 +82,15 @@ def scan_lesson_cached_audios(title):
                 speed_match = re.search(r'_speed_rate_(-?\d+)', name)
                 if speed_match:
                     pure_num = speed_match.group(1)
-                    display_text = f"{pure_num}%"
-                    found_tracks.append((display_text, name))
+                    # 🌟 翻譯！如果找不到匹配則顯示原來的百分比
+                    display_text = text_mapping.get(pure_num, f"{pure_num}%")
+                    found_tracks.append((display_text, name, pure_num))
     try:
-        found_tracks.sort(key=lambda x: int(x[0].replace("%", "")))
+        # 按照速度大小排序（轉成整數由大到小排序）
+        found_tracks.sort(key=lambda x: int(x[2]), reverse=True)
     except:
         found_tracks.sort()
-    return found_tracks
+    return [(t[0], t[1]) for t in found_tracks]
 
 def generate_raw_github_url(filename):
     import urllib.parse
@@ -229,7 +239,7 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
     
     if mode == "中文":
         protected = clean_text.replace("：「", "【冒引】").replace("：“", "【冒引】")
-        protected = protected.replace("。」", "【句引】").replace("」。", "【句引】")
+        protected = protected.replace("。」", "【句引】").replace("'].", "【句引】")
         protected = protected.replace("《", "【開書名】").replace("》", "【關書名】")
         protected = protected.replace("——", "【破折】")
         
@@ -260,7 +270,7 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
         final_sentences = []
         for s in sub_sentences:
             if not s.strip(): continue
-            if final_sentences and s[0] in ['，', '、', '。', '！', '？', '；', '：', '」', '》', ',', '.', '!', '?', ';', ':']:
+            if final_sentences and s[0] in ['，', '、', '。', '！', '？', '；', '：', '」', '裝', ',', '.', '!', '?', ';', ':']:
                 final_sentences[-1] = final_sentences[-1] + s
             else:
                 final_sentences.append(s)
@@ -315,7 +325,7 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能中英雙語默書聽寫機 v1.11.0")
+st.title("📖 智能中英雙語默書聽寫機 v1.11.1")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -434,7 +444,6 @@ with tab2:
 with tab3:
     st.subheader("📢 智能雙語聽寫默書專區")
     
-    # 🌟 UI 改良 1：移除冗長備註，簡化為 Aria 老師
     play_mode = st.radio("請指定本課發音語系規格：", ["🇨🇳 普通話模式 (曉曉老師)", "🇬🇧 英語模式 (Aria老師)"], horizontal=True)
     active_lang = "中文" if "普通話" in play_mode else "英文"
     
@@ -450,15 +459,13 @@ with tab3:
     st.markdown("---")
     st.markdown("#### ⚙️ 老師發音參數調節面板")
     
-    # 🌟 UI 改良 2 & 3：精簡語速標題，將 Slider 換成 4 個精準 Level 的 Radio
     speed_level = st.radio(
         "請調較老師的聽寫語速：",
         ["快", "正常", "慢", "好慢"],
-        index=1, # 預設為正常
+        index=1, 
         horizontal=True
     )
     
-    # 將 4 個精準 Level 映射到 TTS 發音速率
     speed_mapping = {
         "快": ("0%", 0),
         "正常": ("-20%", -20),
@@ -505,7 +512,8 @@ with tab3:
             if cached_tracks:
                 st.success(f"✨ 成功在雲端搵到 {len(cached_tracks)} 個不同語速的版本！想播邊個直接撳 Play：")
                 for speed_text, filename in cached_tracks:
-                    with st.expander(f"▶️ 點擊展開點播：【語速 {speed_text}】完整聽寫連續軌", expanded=True):
+                    # 🌟 完美改版：【語速 -30%】全面改成地道中文化語速口語【語速：慢】！
+                    with st.expander(f"▶️ 點擊展開點播：【語速：{speed_text}】完整聽寫連續軌", expanded=True):
                         raw_stream_url = generate_raw_github_url(filename)
                         st.audio(raw_stream_url, format="audio/mp3")
             else:
