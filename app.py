@@ -38,7 +38,7 @@ def read_from_vault():
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================================
-# 🧠 雙語核心功能函數 (書名號完美修復版)
+# 🧠 雙語核心功能函數
 # ==========================================================
 def save_to_github(title, content):
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.txt"
@@ -162,9 +162,7 @@ def gemini_vision_extract_bilingual(base64_images_list, mode="中文"):
         return f"Gemini 辨識發生異常: {str(e)}"
 
 def convert_punctuation_to_words_bilingual(text, mode="中文"):
-    """根據中英文模式，自動將標點符號轉化為對應的聽寫口令"""
     if mode == "中文":
-        # 🟢 震撼修正：書名號完美重回歷史舞台！
         text = text.replace("《", "開書名號").replace("》", "關書名號")
         text = text.replace("，", "逗號").replace(",", "逗號")
         text = text.replace("。", "句號").replace(".", "句號")
@@ -195,6 +193,10 @@ def convert_punctuation_to_words_bilingual(text, mode="中文"):
 async def generate_audio_clean_raw_bilingual(speak_text, custom_rate="-60%", mode="中文"):
     if not speak_text.strip(): return b""
     try:
+        # 🌟 核心修正：如果畫面上拉到 0% 語速，標準化為 Edge-TTS 認識的 "+0%"，防止後台拋錯崩潰
+        if custom_rate == "0%":
+            custom_rate = "+0%"
+        
         voice_model = "zh-CN-XiaoxiaoNeural" if mode == "中文" else "en-US-ZariNeural"
         communicate = edge_tts.Communicate(speak_text, voice_model, rate=custom_rate)
         audio_data = b""
@@ -215,7 +217,6 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
     if mode == "中文":
         protected = clean_text.replace("：「", "【冒引】").replace("：“", "【冒引】")
         protected = protected.replace("。」", "【句引】").replace("」。", "【句引】")
-        # 🟢 書名號切分防線
         protected = protected.replace("《", "【開書名】").replace("》", "【關書名】")
         
         strong_ends = ['。', '！', '？', '；', '——']
@@ -230,33 +231,23 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
             if char not in (strong_ends + split_chars + ['·']):
                 current_char_count += 1
             if char in strong_ends or (current_char_count >= target_len and char in split_chars):
-                chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」")
+                chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "結構。」")
                 chunk_restore = chunk_restore.replace("【開書名】", "《").replace("【關書名】", "》")
                 if chunk_restore.strip(): sub_sentences.append(chunk_restore.strip())
                 current_chunk = ""
                 current_char_count = 0
         if current_chunk.strip():
-            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」")
+            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "结构。」")
             chunk_restore = chunk_restore.replace("【開書名】", "《").replace("【關書名】", "》")
             sub_sentences.append(chunk_restore)
     else:
-        sentences = re.split(r'([\.!\?;\n]+)', clean_text)
-        sub_sentences = []
-        temp = ""
-        for item in sentences:
-            if not item: continue
-            if re.match(r'[\.!\?;\n]+', item):
-                temp += item
-                sub_sentences.append(temp.strip())
-                temp = ""
-            else:
-                temp += item
-        if temp.strip(): sub_sentences.append(temp.strip())
+        sentences = re.split(r'(?<=[\.!\?;\n])\s+', clean_text)
+        sub_sentences = [s.strip() for s in sentences if s.strip()]
         
     final_sentences = []
     for s in sub_sentences:
         if not s.strip(): continue
-        if final_sentences and s[0] in ['，', '、', '。', '！', '？', '；', '：', '」', '》', ',', '.', '!', '?', ';', ':']:
+        if final_sentences and s[0] in ['，', '、', '。', '！', '？', '；', '：', '」', '役', ',', '.', '!', '?', ';', ':']:
             final_sentences[-1] = final_sentences[-1] + s
         else:
             final_sentences.append(s)
@@ -266,7 +257,7 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能中英雙語默書聽寫機 v1.9.2")
+st.title("📖 智能中英雙語默書聽寫機 v1.9.4")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -349,17 +340,18 @@ with tab2:
                 
     with c_del:
         if sel != "-- 請選擇課文 --":
-            if st.button("🗑️ 徹底刪除雲端課文及音軌快取", key="del_btn_t2", type="primary"):
-                with st.spinner(f"💥 正在從雲端徹底剷除《{sel}》的文字與 MP3 檔..."):
-                    txt_ok = delete_from_github(sel)
-                    mp3_ok = delete_audio_from_github(sel)
-                    if txt_ok:
-                        write_to_vault("") 
-                        st.session_state["current_lesson_title"] = ""
-                        st.session_state["instant_audio_bytes"] = None
-                        st.success(f"✨ 剷除成功！《{sel}》的文字檔檔已被永久消滅！")
-                        time.sleep(1)
-                        st.rerun()
+            if f"🗑️ 徹底刪除雲端課文及音軌快取":
+                if st.button("🗑️ 徹底刪除雲端課文及音軌快取", key="del_btn_t2", type="primary"):
+                    with st.spinner(f"💥 正在從雲端徹底剷除《{sel}》的文字與 MP3 檔..."):
+                        txt_ok = delete_from_github(sel)
+                        mp3_ok = delete_audio_from_github(sel)
+                        if txt_ok:
+                            write_to_vault("") 
+                            st.session_state["current_lesson_title"] = ""
+                            st.session_state["instant_audio_bytes"] = None
+                            st.success(f"✨ 剷除成功！《{sel}》的文字檔檔已被永久消滅！")
+                            time.sleep(1)
+                            st.rerun()
             
     t2 = st.text_area("課文內容 Text Box", value=current_text, height=250, key=f"t2_{text_hash}")
     if t2 != current_text: write_to_vault(t2)
@@ -395,9 +387,11 @@ with tab3:
             
     st.markdown("---")
     st.markdown("#### ⚙️ 老師發音參數調節面板")
+    
+    # 🌟 核心升級：將預設值 value 由 -60 改為你最想要的黃金加操速 -20
     speed_percent = st.slider(
         "請調較老師的聽寫語速（僅用於全新生成）：", 
-        min_value=-80, max_value=0, value=-60, step=5, format="%d%%"
+        min_value=-80, max_value=0, value=-20, step=5, format="%d%%"
     )
     custom_rate_str = f"{speed_percent}%"
     
@@ -475,7 +469,7 @@ with tab3:
                 if active_lang == "中文":
                     blocks = [b.strip() for b in re.split(r'(開書名號|關書名號|逗號|句號|感嘆號|問號|分號|冒號|頓號|開引號|關引號)', text_with_breathes) if b.strip()]
                 else:
-                    blocks = [b.strip() for b in re.split(r'(comma|full stop|exclamation mark|question mark|semicolon|colon|open inverted commas|close inverted commas)', text_with_breathes) if b.strip()]
+                    blocks = [text_with_breathes.strip()]
                 
                 sentence_audio_stream = b""
                 for blk in blocks:
@@ -532,7 +526,7 @@ with tab3:
                         if active_lang == "中文":
                             blocks = [b.strip() for b in re.split(r'(開書名號|關書名號|逗號|句號|感嘆號|問號|分號|冒號|頓號|開引號|關引號)', text_with_breathes) if b.strip()]
                         else:
-                            blocks = [b.strip() for b in re.split(r'(comma|full stop|exclamation mark|question mark|semicolon|colon|open inverted commas|close inverted commas)', text_with_breathes) if b.strip()]
+                            blocks = [text_with_breathes.strip()]
                         
                         sentence_audio_stream = b""
                         for blk in blocks:
