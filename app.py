@@ -172,7 +172,6 @@ def convert_punctuation_to_words_bilingual(text, mode="中文"):
         text = text.replace("：", "冒號").replace(":", "冒號")
         text = text.replace("、", "頓號")
         
-        # 🟢 全面覆蓋中文的單、雙引號
         text = text.replace("「", "開引號").replace("」", "關引號")
         text = text.replace("『", "開引號").replace("』", "關引號")
         text = text.replace("“", "開引號").replace("”", "關引號")
@@ -185,17 +184,13 @@ def convert_punctuation_to_words_bilingual(text, mode="中文"):
         text = text.replace(";", " semicolon ").replace("；", " semicolon ")
         text = text.replace(":", " colon ").replace("：", " colon ")
         
-        # 🟢 完美處理英文單/雙引號，並設立 Apostrophe (撇號) 防護盾
-        # 1. 保護縮寫 (如 don't, I'm, it's)，將夾在字母中間的 ' 或 ’ 暫時替換
         text = re.sub(r"([a-zA-Z])[’']([a-zA-Z])", r"\1【APOS】\2", text)
         
-        # 2. 處理標準彎引號 (Smart Quotes)
         text = text.replace("“", " open quotation mark ")
         text = text.replace("”", " close quotation mark ")
         text = text.replace("‘", " open quotation mark ")
         text = text.replace("’", " close quotation mark ")
         
-        # 3. 處理直引號 (Straight Quotes " 和 ')
         quote_count = 0
         def replace_quote(match):
             nonlocal quote_count
@@ -203,8 +198,6 @@ def convert_punctuation_to_words_bilingual(text, mode="中文"):
             return " open quotation mark " if quote_count % 2 != 0 else " close quotation mark "
         
         text = re.sub(r'["\']', replace_quote, text)
-        
-        # 4. 解除防護盾，還原 Apostrophe 為直撇號，等 Aria 老師識得連讀
         text = text.replace("【APOS】", "'")
         
     return text
@@ -276,7 +269,7 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能中英雙語默書聽寫機 v1.9.8")
+st.title("📖 智能中英雙語默書聽寫機 v1.9.9")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -335,11 +328,12 @@ with tab1:
     with c2:
         st.write(" ")
         st.write(" ")
+        # 🟢 修正：使用 t1 提交，不再使用 current_text
         if st.button("💾 確認儲存至 Git", key="save_btn_t1"):
-            if not title_t1.strip() or not current_text.strip(): st.error("標題和內容不能為空！")
+            if not title_t1.strip() or not t1.strip(): st.error("標題和內容不能為空！")
             else:
                 with st.spinner("同步中..."):
-                    if save_to_github(title_t1.strip(), current_text): 
+                    if save_to_github(title_t1.strip(), t1): 
                         st.session_state["current_lesson_title"] = title_t1.strip()
                         st.session_state["instant_audio_bytes"] = None
                         st.success("成功同步至 GitHub 雲端！")
@@ -379,11 +373,12 @@ with tab2:
     with c3:
         default_name = sel if sel != "-- 請選擇課文 --" else ""
         title_t2 = st.text_input("請輸入課文標題：", value=default_name, key="title_t2")
+    # 🟢 修正：使用 t2 提交，不再使用 current_text
     if st.button("💾 確認儲存至 Git", key="save_btn_t2"):
-        if not title_t2.strip() or not current_text.strip(): st.error("標題和內容不能為空！")
+        if not title_t2.strip() or not t2.strip(): st.error("標題和內容不能為空！")
         else:
             with st.spinner("同步中..."):
-                if save_to_github(title_t2.strip(), current_text): 
+                if save_to_github(title_t2.strip(), t2): 
                     st.session_state["current_lesson_title"] = title_t2.strip()
                     st.session_state["instant_audio_bytes"] = None
                     st.success("成功同步至 GitHub 雲端！")
