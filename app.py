@@ -26,13 +26,13 @@ st.markdown("""
         box-shadow: 0 4px 6px rgba(0,0,0,0.05) !important;
         transition: all 0.3s ease !important;
         
-        /* 💡 核心修正：允許按鈕內的文字識別換行，並調整基本字體 */
+        /* 核心修正：允許按鈕內的文字識別換行，並調整基本字體 */
         white-space: pre-line !important;
         font-size: 16px !important;
         line-height: 1.5 !important;
     }
     
-    /* 🚀 終極魔法：將按鈕內的第一個字（即係 Emoji）單獨放大到 64px！ */
+    /* 將按鈕內的第一個字（即係 Emoji）單獨放大到 64px！ */
     div.stButton > button::first-line {
         font-size: 64px !important;
         line-height: 1.2 !important;
@@ -57,7 +57,30 @@ st.markdown("""
 col1, col2 = st.columns(2)
 
 with col1:
-    # 📝 默書工具大按鈕 (Emoji 放在第一行，會被 CSS 自動放大)
+    # 📝 默書工具大按鈕 (🚀 修正：改用 三引號 確保多行字串不會斷開)
     btn_dictation = st.button(
-        "📝\n\n**默書工具**\n智能語音讀默、自動對手寫稿，輕鬆處理學生日常默書。",
-        key="btn_
+        """📝
+
+**默書工具**
+智能語音讀默、自動對手寫稿，輕鬆處理學生日常默書。""",
+        key="btn_dict",
+        use_container_width=True
+    )
+    if btn_dictation:
+        st.switch_page("pages/1_📝_默書工具.py")
+
+with col2:
+    # 📚 試卷生成器大按鈕 (🚀 修正：改用 三引號 確保多行字串不會斷開)
+    btn_exam = st.button(
+        """📚
+
+**試卷生成器**
+上傳範圍與工作紙，AI 自動生成香港小學風格試卷。""",
+        key="btn_exam",
+        use_container_width=True
+    )
+    if btn_exam:
+        st.switch_page("pages/2_📚_考試卷生成器.py")
+
+st.write("##")
+st.write("---")
