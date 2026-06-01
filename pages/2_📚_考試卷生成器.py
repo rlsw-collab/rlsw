@@ -4,7 +4,39 @@ import requests
 import json
 import base64
 import markdown
-import uuid
+
+# ==========================================
+# 0. 網頁基本設定與【密碼鎖邏輯】
+# ==========================================
+st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
+
+# 初始化 session_state 來記住登入狀態
+if 'authenticated' not in st.session_state:
+    st.session_state['authenticated'] = False
+
+# 如果還未登入，顯示密碼輸入框
+if not st.session_state['authenticated']:
+    st.title("🔒 考試卷生成工具 (受保護)")
+    st.info("請輸入密碼以解鎖並使用此工具。")
+    
+    # 密碼輸入框 (type="password" 會將輸入的字元變成黑點)
+    pwd_input = st.text_input("輸入密碼：", type="password")
+    
+    if st.button("解鎖 🔓"):
+        if pwd_input == "royroy":
+            st.session_state['authenticated'] = True
+            st.success("✅ 密碼正確！正在載入工具...")
+            st.rerun()  # 重新整理網頁，進入下方主程式
+        elif pwd_input != "":
+            st.error("❌ 密碼錯誤，請重試！")
+            
+    # st.stop() 非常重要！它會阻止未登入的用戶看到或執行下方的所有代碼
+    st.stop()
+
+# ==========================================
+# 以下為原本的考試卷生成器代碼 (只有解鎖後才會執行)
+# ==========================================
+st.title("📚 香港小學測驗/考試卷生成工具")
 
 # ==========================================
 # 1. 初始化與安全金鑰設定
@@ -58,15 +90,12 @@ def get_file_from_github(path):
     return None
 
 # ==========================================
-# 3. Streamlit 網頁介面設計 (已更新版面配置)
+# 3. Streamlit 網頁介面設計
 # ==========================================
-st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
-st.title("📚 香港小學測驗/考試卷生成工具")
-
 if 'generated_exam' not in st.session_state:
     st.session_state['generated_exam'] = ""
 
-# --- 🆕 舊包裹載入區塊 (已搬移至主畫面最頂部) ---
+# --- 舊包裹載入區塊 ---
 st.markdown("### 📂 開啟 / 修改現有包裹")
 with st.container():
     col_load1, col_load2 = st.columns([3, 1])
@@ -89,7 +118,7 @@ with st.container():
         else:
             st.error("請輸入包裹名稱")
 
-st.write("---") # 加一條分隔線
+st.write("---") 
 
 # --- 主畫面其餘布局 ---
 st.subheader("📋 基本資料設定")
