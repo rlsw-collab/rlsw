@@ -4,11 +4,15 @@ import json
 import base64
 import markdown
 import time
+from PIL import Image
 
 # ==========================================
 # 0. 網頁基本設定與【密碼鎖邏輯】
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
+
+# 🆕 應您要求：定義統一的標題與版本號碼
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.0.4"
 
 # 初始化 session_state 來記住登入狀態
 if 'authenticated' not in st.session_state:
@@ -16,11 +20,12 @@ if 'authenticated' not in st.session_state:
 
 # 如果還未登入，顯示密碼輸入框
 if not st.session_state['authenticated']:
-    st.title("🔒 考試卷生成工具 (受保護)")
-    st.info("請輸入密碼以解鎖並使用此工具。")
+    # 🆕 修正：入密碼時就顯示一模一樣的標題
+    st.title(APP_TITLE)
+    st.info("🔒 此工具受保護，請輸入密碼以解鎖並使用。")
     
     # 密碼輸入框
-    pwd_input = st.text_input("輸入密碼：", type="password")
+    pwd_input = st.text_input("輸入專屬訪問密碼：", type="password")
     
     if st.button("解鎖 🔓"):
         if pwd_input == "royroy":
@@ -35,8 +40,8 @@ if not st.session_state['authenticated']:
 # ==========================================
 # 主程式 (只有解鎖後才會執行)
 # ==========================================
-# 🆕 版本號跳升至 v1.0.3，採用 2.5 Flash + 智慧自動重試機制
-st.title("📚 香港小學測驗/考試卷生成工具 v1.0.3")
+# 🆕 保持標題一致
+st.title(APP_TITLE)
 
 # ==========================================
 # 1. 安全金鑰設定 (完美對接默書機的 Secrets)
@@ -127,13 +132,45 @@ with col1:
 with col2:
     grade = st.selectbox("選擇年級", ["小一", "小二", "小三", "小四", "小五", "小六"])
 
+# --- 1. 設定考試範圍與縮圖預覽 ---
 st.subheader("🎯 1. 設定考試範圍")
 range_files = st.file_uploader("上傳範圍圖片/文件 (可多選)", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True, key="range")
+
+# 🆕 縮圖預覽功能：如果用家上傳了範圍檔案，自動生成圖片縮圖
+if range_files:
+    img_files = [f for f in range_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
+    if img_files:
+        st.markdown("📸 **已上傳的範圍圖片預覽：**")
+        cols = st.columns(min(len(img_files), 6)) # 每行最多排 6 張縮圖
+        for idx, f in enumerate(img_files):
+            with cols[idx % 6]:
+                try:
+                    img = Image.open(f)
+                    st.image(img, caption=f.name if len(f.name) < 15 else f.name[:12]+"...", use_container_width=True)
+                except:
+                    pass
+
 range_text = st.text_area("微調範圍 (例如：只考第一至三課、加強應用題等)", placeholder="輸入想讓 AI 特別注意的調整...")
 
+# --- 2. 題目類型參考與縮圖預覽 ---
 st.subheader("📝 2. 題目類型參考")
 style_files = st.file_uploader("上傳工作紙/作業參考 (可多選)", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True, key="style")
 
+# 🆕 縮圖預覽功能：如果用家上傳了題型參考，自動生成圖片縮圖
+if style_files:
+    style_img_files = [f for f in style_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
+    if style_img_files:
+        st.markdown("📸 **已上傳的題型參考圖片預覽：**")
+        cols_style = st.columns(min(len(style_img_files), 6))
+        for idx, f in enumerate(style_img_files):
+            with cols_style[idx % 6]:
+                try:
+                    img = Image.open(f)
+                    st.image(img, caption=f.name if len(f.name) < 15 else f.name[:12]+"...", use_container_width=True)
+                except:
+                    pass
+
+# --- 3. 打包與儲存設定 ---
 st.subheader("💾 3. 打包與儲存設定 (GitHub)")
 package_name = st.text_input("請輸入這個考試包裹的名稱", placeholder="同名將會覆蓋/更新 GitHub 上的舊資料")
 
@@ -168,7 +205,6 @@ if st.button("🚀 開始利用 Gemini AI 製作試卷"):
         請使用清晰的 Markdown 格式輸出。
         """
         
-        # 鎖定 100% 支援的 2.5 Flash
         api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
         headers = {"Content-Type": "application/json"}
         payload = {
@@ -179,7 +215,6 @@ if st.button("🚀 開始利用 Gemini AI 製作試卷"):
             ]
         }
         
-        # 🔄 智慧重試核心邏輯
         max_retries = 3
         success = False
         
@@ -191,9 +226,8 @@ if st.button("🚀 開始利用 Gemini AI 製作試卷"):
                     ai_result = res_json['candidates'][0]['content']['parts'][0]['text']
                     st.session_state['generated_exam'] = ai_result
                     success = True
-                    break  # 成功了就跳出循環
+                    break
                 elif res.status_code == 503 and attempt < max_retries - 1:
-                    # 如果遇到 503 超載，等待 3 秒後自動重試
                     st.warning(f"⚠️ 伺服器目前較為繁忙（503），正在進行第 {attempt + 1} 次自動重新連線...")
                     time.sleep(3)
                 else:
@@ -207,7 +241,7 @@ if st.button("🚀 開始利用 Gemini AI 製作試卷"):
                     break
                     
         if success:
-            st.rerun() # 成功後刷新網頁展現成果
+            st.rerun()
 
 # --- 試卷預覽與打印 ---
 if st.session_state['generated_exam']:
