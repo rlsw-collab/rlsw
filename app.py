@@ -193,17 +193,18 @@ def convert_punctuation_to_words_bilingual(text, mode="中文"):
 async def generate_audio_clean_raw_bilingual(speak_text, custom_rate="-20%", mode="中文"):
     if not speak_text.strip(): return b""
     try:
-        # 🌟🌟 終極全局防護網：徹底馴服 0% 和所有未格式化的語速字串 🌟🌟
         if str(custom_rate).strip() == "0%":
             custom_rate = "+0%"
             
-        voice_model = "zh-CN-XiaoxiaoNeural" if mode == "中文" else "en-US-ZariNeural"
+        # 🔥 終極修復：撤換被封殺的 Zari，改用 100% 穩定的 Aria 老師！
+        voice_model = "zh-CN-XiaoxiaoNeural" if mode == "中文" else "en-US-AriaNeural"
         communicate = edge_tts.Communicate(speak_text, voice_model, rate=custom_rate)
         audio_data = b""
         async for chunk in communicate.stream():
             if chunk["type"] == "audio": audio_data += chunk["data"]
         return audio_data
-    except:
+    except Exception as e:
+        print(f"TTS 發音生成報錯: {str(e)}") # 保留報錯資訊
         return b""
 
 def generate_true_mp3_silence(seconds):
@@ -241,7 +242,6 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
             chunk_restore = chunk_restore.replace("【開書名】", "《").replace("【關書名】", "》")
             sub_sentences.append(chunk_restore)
     else:
-        # 🇬🇧 依據英文句號標點平滑分割句子
         sentences = re.split(r'(?<=[\.!\?;\n])\s+', clean_text)
         sub_sentences = [s.strip() for s in sentences if s.strip()]
         
@@ -258,7 +258,7 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能中英雙語默書聽寫機 v1.9.5")
+st.title("📖 智能中英雙語默書聽寫機 v1.9.6")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -286,7 +286,7 @@ if not st.session_state["authenticated"]:
 current_text = read_from_vault()
 text_hash = str(len(current_text)) + "_" + str(hash(current_text))
 
-tab1, tab2, tab3 = st.tabs(["📸 1. Gemini 雙語影相辨識", "✍️ 2. 雲端舊課文載入與修改", "📢 3. 曉曉/佐伊老師聽寫專區"])
+tab1, tab2, tab3 = st.tabs(["📸 1. Gemini 雙語影相辨識", "✍️ 2. 雲端舊課文載入與修改", "📢 3. 曉曉/Aria老師聽寫專區"])
 
 with tab1:
     st.subheader("📸 拍下課本圖片（自動偵測中英文）")
@@ -373,7 +373,8 @@ with tab2:
 with tab3:
     st.subheader("📢 智能雙語聽寫默書專區")
     
-    play_mode = st.radio("請指定本課發音語系規格：", ["🇨🇳 普通話模式 (曉曉老師)", "🇬🇧 英語模式 (佐伊老師 - Full stop版)"], horizontal=True)
+    # 🔥 更新 UI 選項名稱為 Aria 老師
+    play_mode = st.radio("請指定本課發音語系規格：", ["🇨🇳 普通話模式 (曉曉老師)", "🇬🇧 英語模式 (Aria老師 - Full stop版)"], horizontal=True)
     active_lang = "中文" if "普通話" in play_mode else "英文"
     
     lessons_t3 = load_all_lessons()
@@ -388,7 +389,6 @@ with tab3:
     st.markdown("---")
     st.markdown("#### ⚙️ 老師發音參數調節面板")
     
-    # 🌟 預設值完美鎖定在你最愛的 -20%
     speed_percent = st.slider(
         "請調較老師的聽寫語速（僅用於全新生成）：", 
         min_value=-80, max_value=0, value=-20, step=5, format="%d%%"
@@ -476,7 +476,6 @@ with tab3:
                 sentence_audio_stream = b""
                 for blk in blocks:
                     blk_clean = re.sub(r'[\s·\裝]', '', blk) if active_lang == "中文" else blk.strip()
-                    # 🟢 這裡已被全局防護網死死鎖定，0% 自動轉化為 +0%，絕對不崩潰
                     blk_audio = loop.run_until_complete(generate_audio_clean_raw_bilingual(blk_clean, custom_rate=custom_rate_str, mode=active_lang))
                     if blk_audio:
                         sentence_audio_stream += blk_audio + silence_0_5s
@@ -506,7 +505,7 @@ with tab3:
                 time.sleep(2)
                 st.rerun()
             else: 
-                st.error("⚠️ 音軌生成失敗。")
+                st.error("⚠️ 音軌生成失敗。發音介面可能被拒絕連線。")
                 my_bar.empty()
             
         st.markdown("---")
