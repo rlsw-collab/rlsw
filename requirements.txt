@@ -6,3 +6,5 @@ azure-ai-inference
 azure-core
 edge-tts
 requests
+google-generativeai
+markdown
