@@ -12,107 +12,84 @@ st.write("##")
 st.markdown("<p style='text-align: center; color: #999; font-size: 14px; font-style: italic;'>💡 提示：點擊下方大按鈕即可進入工具，您亦可以隨時使用左側選單快速切換。</p>", unsafe_allow_html=True)
 st.write("#")
 
-# 🎨 終極魔法 CSS (直接由 CSS 產生巨型 Emoji)
+# 🎨 完美卡片 CSS (純網頁設計，不受 Streamlit 按鈕限制)
 st.markdown("""
 <style>
-    /* 1. 確保左右兩邊的 column 高度一致 */
-    [data-testid="stHorizontalBlock"] {
-        align-items: stretch !important;
+    .my-card-container {
+        display: flex;
+        gap: 25px;
+        justify-content: center;
+        flex-wrap: wrap;
+        margin-top: 10px;
     }
-
-    /* 2. 重塑 Streamlit 原生按鈕的外觀 */
-    div.stButton > button {
-        background-color: #f8f9fa !important;
-        border: 2px solid #e9ecef !important;
-        border-radius: 15px !important;
-        padding: 30px 20px !important;
-        width: 100% !important;
-        height: 100% !important; 
-        min-height: 250px !important;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05) !important;
-        transition: all 0.3s ease !important;
-        white-space: pre-line !important;
-        text-align: center !important;
+    .my-card {
+        background-color: #f8f9fa;
+        border: 2px solid #e9ecef;
+        border-radius: 15px;
+        padding: 30px 20px;
+        width: 260px;
+        min-height: 250px;
+        text-align: center;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        text-decoration: none !important;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.3s ease;
     }
-    
-    /* 清除 Streamlit 內部 p 標籤的干擾 */
-    div.stButton > button p {
-        font-size: 14px !important;
-        color: #6c757d !important;
-        line-height: 1.6 !important;
-        margin: 0 !important;
-        padding: 0 !important;
+    /* 滑鼠懸停特效 */
+    .my-card:hover {
+        transform: translateY(-6px);
+        box-shadow: 0 12px 20px rgba(0,0,0,0.1);
+        border-color: #ff4b4b;
+        background-color: #ffffff;
     }
-    
-    /* 🚀 3. 終極魔法：左邊卡片強制注入 64px 的 📝 */
-    [data-testid="column"]:nth-of-type(1) div.stButton > button p::before {
-        content: "📝";
-        font-size: 64px !important;
-        display: block !important;
-        margin-bottom: 10px !important;
-        line-height: 1.2 !important;
+    /* 巨大 Emoji */
+    .my-card-emoji {
+        font-size: 64px;
+        margin-bottom: 15px;
+        line-height: 1.2;
     }
-    
-    /* 🚀 4. 終極魔法：右邊卡片強制注入 64px 的 📚 */
-    [data-testid="column"]:nth-of-type(2) div.stButton > button p::before {
-        content: "📚";
-        font-size: 64px !important;
-        display: block !important;
-        margin-bottom: 10px !important;
-        line-height: 1.2 !important;
+    /* 標題字體 */
+    .my-card-title {
+        font-size: 22px;
+        font-weight: bold;
+        color: #212529;
+        margin-bottom: 10px;
+        transition: color 0.3s ease;
     }
-
-    /* 5. 標題樣式 */
-    div.stButton > button strong {
-        font-size: 22px !important;
-        color: #212529 !important;
-        display: block !important;
-        margin-top: 5px !important;
-        margin-bottom: 10px !important;
+    .my-card:hover .my-card-title {
+        color: #ff4b4b; /* 懸停變紅 */
     }
-    
-    /* 6. 介紹文字樣式 */
-    div.stButton > button em {
-        font-size: 14px !important;
-        color: #6c757d !important;
-        font-style: normal !important;
-        display: block !important;
-    }
-
-    /* 7. Hover 懸停特效 */
-    div.stButton > button:hover {
-        transform: translateY(-6px) !important;
-        box-shadow: 0 12px 20px rgba(0,0,0,0.1) !important;
-        border-color: #ff4b4b !important;
-        background-color: #ffffff !important;
-    }
-    div.stButton > button:hover strong {
-        color: #ff4b4b !important; 
-    }
-    div.stButton > button:active {
-        transform: translateY(-2px) !important;
+    /* 介紹文字 */
+    .my-card-desc {
+        font-size: 14px;
+        color: #6c757d;
+        line-height: 1.5;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# 橫向排列兩個大按鈕
-col1, col2 = st.columns(2)
+# 🚀 終極殺手鐧：利用 Python 自動拼接字串，確保 HTML「一行過」完全無換行
+# 咁樣 Streamlit 嘅 Markdown 解析器就絕對唔會當佢係代碼區塊！
+cards_html = (
+    '<div class="my-card-container">'
+    '<a href="/%E9%BB%98%E6%9B%B8%E5%B7%A5%E5%85%B7" target="_self" class="my-card">'
+    '<span class="my-card-emoji">📝</span>'
+    '<span class="my-card-title">默書工具</span>'
+    '<span class="my-card-desc">智能語音讀默、自動對手寫稿，輕鬆處理學生日常默書。</span>'
+    '</a>'
+    '<a href="/%E8%80%83%E8%A9%A6%E5%8D%B7%E7%94%9F%E6%88%90%E5%99%A8" target="_self" class="my-card">'
+    '<span class="my-card-emoji">📚</span>'
+    '<span class="my-card-title">試卷生成器</span>'
+    '<span class="my-card-desc">上傳範圍與工作紙，AI 自動生成香港小學風格試卷。</span>'
+    '</a>'
+    '</div>'
+)
 
-with col1:
-    # 📝 注意：Python 這裡的文字【已經刪除了 Emoji】，交由上方 CSS 自動生成巨大版！
-    btn_text_1 = """**默書工具**
-_智能語音讀默、自動對手寫稿，輕鬆處理學生日常默書。_"""
-    
-    if st.button(btn_text_1, key="btn_dict_final", use_container_width=True):
-        st.switch_page("pages/1_📝_默書工具.py")
-
-with col2:
-    # 📚 注意：Python 這裡的文字【已經刪除了 Emoji】，交由上方 CSS 自動生成巨大版！
-    btn_text_2 = """**試卷生成器**
-_上傳範圍與工作紙，AI 自動生成香港小學風格試卷。_"""
-    
-    if st.button(btn_text_2, key="btn_exam_final", use_container_width=True):
-        st.switch_page("pages/2_📚_考試卷生成器.py")
+# 渲染卡片
+st.markdown(cards_html, unsafe_allow_html=True)
 
 st.write("##")
 st.write("---")
