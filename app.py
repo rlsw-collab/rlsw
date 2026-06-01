@@ -4,12 +4,12 @@ import streamlit.components.v1 as components
 # 設定網頁標題與排版
 st.set_page_config(page_title="AI 智能教學工具箱", layout="centered")
 
-# 主標題 (保留 Streamlit 原生渲染，確保置中好看)
+# 主標題
 st.markdown("<h1 style='text-align: center; color: #4A90E2;'>🎒 AI 智能教學工具箱</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center; color: #666; font-size: 18px;'>歡迎使用！請選擇您今天需要使用的教學輔助工具：</p>", unsafe_allow_html=True)
 st.write("##")
 
-# 🚀 將所有的 CSS 同 HTML 封裝成一個純網頁字串
+# 將所有的 CSS 同 HTML 封裝成一個純網頁字串
 all_html_content = """
 <!DOCTYPE html>
 <html>
@@ -19,7 +19,7 @@ all_html_content = """
     body {
         margin: 0;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        background-color: transparent; /* 配合 Streamlit 的背景色 */
+        background-color: transparent;
     }
     .container {
         display: flex;
@@ -84,8 +84,8 @@ all_html_content = """
 </html>
 """
 
-# 使用 components.html 強制以純 HTML 渲染，徹底繞過 Streamlit Markdown Bug
-components.html(all_html_content, height=420, scroller=False)
+# 🚀 這裡已經修正為 scrolling=False
+components.html(all_html_content, height=420, scrolling=False)
 
 st.write("##")
 st.write("---")
