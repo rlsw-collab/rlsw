@@ -19,7 +19,7 @@ if not st.session_state['authenticated']:
     st.title("🔒 考試卷生成工具 (受保護)")
     st.info("請輸入密碼以解鎖並使用此工具。")
     
-    # 密碼輸入框 (type="password" 會將輸入的字元變成黑點)
+    # 密碼輸入框
     pwd_input = st.text_input("輸入密碼：", type="password")
     
     if st.button("解鎖 🔓"):
@@ -30,8 +30,7 @@ if not st.session_state['authenticated']:
         elif pwd_input != "":
             st.error("❌ 密碼錯誤，請重試！")
             
-    # st.stop() 非常重要！它會阻止未登入的用戶看到或執行下方的所有代碼
-    st.stop()
+    st.stop() # 阻斷未登入者執行下方代碼
 
 # ==========================================
 # 以下為原本的考試卷生成器代碼 (只有解鎖後才會執行)
@@ -194,7 +193,8 @@ if st.button("🚀 開始利用 Gemini AI 製作試卷"):
         contents.append(core_prompt)
         
         try:
-            model = genai.GenerativeModel('gemini-1.5-pro-001')
+            # 🚀 終極修正：使用 100% 開放、最穩定的 gemini-1.5-flash 模型，解決 404 報錯問題！
+            model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content(contents)
             st.session_state['generated_exam'] = response.text
         except Exception as e:
