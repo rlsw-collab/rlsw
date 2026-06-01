@@ -18,32 +18,33 @@ if not st.session_state['authenticated']:
     st.title("🔒 考試卷生成工具 (受保護)")
     st.info("請輸入密碼以解鎖並使用此工具。")
     
+    # 密碼輸入框
     pwd_input = st.text_input("輸入密碼：", type="password")
     
     if st.button("解鎖 🔓"):
         if pwd_input == "royroy":
             st.session_state['authenticated'] = True
             st.success("✅ 密碼正確！正在載入工具...")
-            st.rerun()
+            st.rerun()  # 重新整理網頁，進入下方主程式
         elif pwd_input != "":
             st.error("❌ 密碼錯誤，請重試！")
             
-    st.stop()
+    st.stop() # 阻斷未登入者執行下方代碼
 
 # ==========================================
-# 主程式 (只有解鎖後才會執行)
+# 以下為原本的考試卷生成器代碼 (只有解鎖後才會執行)
 # ==========================================
-st.title("📚 香港小學測驗/考試卷生成工具")
+# 🆕 應您要求：加上專屬 Version Number，以便確認最新 Updates 成功套用
+st.title("📚 香港小學測驗/考試卷生成工具 v1.0.1")
 
 # ==========================================
 # 1. 安全金鑰設定 (完美對接默書機的 Secrets)
 # ==========================================
 try:
-    # 🌟 修正：對接你默書 APP 正在運作的金鑰名稱
     GITHUB_TOKEN = st.secrets["GIT_TOKEN"]
     GEMINI_TOKEN = st.secrets["GEMINI_TOKEN"]
     
-    # 這裡借用默書 APP 設定好的 Repo 資訊，如果不同請自行修改下面兩行
+    # 這裡借用默書 APP 設定好的 Repo 資訊
     GITHUB_REPO = "rlsw"
     GITHUB_USER = "rlsw-collab"
 except Exception as e:
@@ -146,11 +147,11 @@ if st.button("📦 儲存並打包資料到 GitHub"):
             st.success(f"🎉 打包成功！所有資料已安全儲存。")
 
 # ==========================================
-# 4. 核心功能：【直升 2.5 Pro 旗艦版】呼叫
+# 4. 核心功能：【免費額度管夠】直連 Gemini 2.5 Flash 
 # ==========================================
 st.subheader("✨ 4. 生成測驗/考試卷")
 if st.button("🚀 開始利用 Gemini AI 製作試卷"):
-    with st.spinner("🚀 頂級 Gemini 2.5 Pro 正在為您構思全套香港小學考卷，請稍候..."):
+    with st.spinner("🚀 閃電 Gemini 2.5 Flash 正在為您構思全套香港小學考卷，請稍候..."):
         
         # 建立強大的出卷 Prompt
         prompt_text = f"你是一位熟知香港小學課程與考試制度的資深小學老師。請為【香港小學{grade}】的學生，製作一份符合教育局課程指引且難易度適中的【{subject}】科測驗/考試卷。\n"
@@ -166,8 +167,8 @@ if st.button("🚀 開始利用 Gemini AI 製作試卷"):
         請使用清晰的 Markdown 格式輸出。
         """
         
-        # 🚀 終極對接魔法：改用與默書機同款的萬用直連網址，並升級到頂級「gemini-2.5-pro」模型
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={GEMINI_TOKEN}"
+        # 🚀 終極完美修正：改用與默書機同款的萬用直連網址，並切換到每天 1500 次免費額度的「gemini-2.5-flash」
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
         headers = {"Content-Type": "application/json"}
         payload = {
             "contents": [
@@ -184,9 +185,9 @@ if st.button("🚀 開始利用 Gemini AI 製作試卷"):
                 ai_result = res_json['candidates'][0]['content']['parts'][0]['text']
                 st.session_state['generated_exam'] = ai_result
             else:
-                st.error(f"❌ Gemini Pro 伺服器拒絕請求 (錯誤代碼 {res.status_code}): {res.text}")
+                st.error(f"❌ Gemini Flash 伺服器拒絕請求 (錯誤代碼 {res.status_code}): {res.text}")
         except Exception as e:
-            st.error(f"❌ 聯絡 Gemini Pro 伺服器失敗: {str(e)}")
+            st.error(f"❌ 聯絡 Gemini Flash 伺服器失敗: {str(e)}")
 
 # --- 試卷預覽與打印 ---
 if st.session_state['generated_exam']:
