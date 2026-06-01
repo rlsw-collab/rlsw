@@ -38,7 +38,7 @@ def read_from_vault():
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================================
-# 🧠 核心功能函數 (升級：引入萬無一失的 Raw 網址直通串流)
+# 🧠 雙語核心功能函數 (書名號完美修復版)
 # ==========================================================
 def save_to_github(title, content):
     url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/lessons/{title}.txt"
@@ -83,10 +83,8 @@ def scan_lesson_cached_audios(title):
     return found_tracks
 
 def generate_raw_github_url(filename):
-    """🌟 革命性升級：繞過一切 API，將中文字檔名進行標準網址編碼，生成直接串流下載連結"""
     import urllib.parse
     encoded_filename = urllib.parse.quote(filename.strip())
-    # 建立 GitHub Raw 原生串流直達網址
     return f"https://raw.githubusercontent.com/{GH_USER}/{GH_REPO}/{GH_BRANCH}/lessons/{encoded_filename}"
 
 def delete_from_github(title):
@@ -130,21 +128,26 @@ def convert_image_to_base64(uploaded_file):
     image.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-def gemini_vision_extract(base64_images_list):
+def gemini_vision_extract_bilingual(base64_images_list, mode="中文"):
     if not base64_images_list: return ""
     if not GEMINI_TOKEN: return "錯誤：未在 Secrets 中設定 GEMINI_TOKEN！"
     try:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
         headers = {"Content-Type": "application/json"}
         
-        prompt_text = """你現在是一個100%精準、只會看圖抄寫的繁體中文打字掃描儀。
-        你看到的圖片是小學課本。漢字的正上方疊加了密密麻麻的普通話拼音。
-
-        【🚫 鋼鐵死命令】：
-        1. 你的眼睛必須完全無視所有拼音字母、英文字元和小圓圈數字標號。
-        2. 盯緊圖片中的【大字漢字】，一字不漏、按照自然段落順序將漢字抄寫下來。
-        3. 絕對禁止任何二次創作、聯想或編造！原圖有甚麼字就寫甚麼字，絕對不准加入任何網上的企業招聘面試故事、愛爾蘭哲人或蘇格拉底的故事！
-        4. 保持全形標點符號與自然段落換行。直接輸出最純淨的繁體中文，不要包含 any Markdown 標籤或你的合理解釋。"""
+        if mode == "中文":
+            prompt_text = """你現在是一個100%精準、只會看圖抄寫的繁體中文打字掃描儀。
+            圖片是小學課本，漢字正上方疊加了密密麻麻的普通話拼音。
+            【🚫 鋼鐵死命令】：
+            1. 完全無視所有拼音字母、英文字元和小圓圈數字標號。
+            2. 盯緊【大字漢字】，一字不漏、按照自然段落順序將漢字抄寫下來，保持全形標點符號與原本換行。直接輸出純文字。"""
+        else:
+            prompt_text = """You are now a 100% accurate, literal English text scanner for school textbooks.
+            【🚫 Strict Commands】:
+            1. Transcribe the English prose text from the image word for word with absolute accuracy.
+            2. Maintain all original capitalization, words, paragraphs, and punctuation (commas, periods, question marks).
+            3. Ignore background illustrations, page numbers, and footnote definitions at the bottom. 
+            4. Output ONLY clean English text. Do not include any explanations or markdown tags."""
 
         parts = [{"text": prompt_text}]
         for b64 in base64_images_list:
@@ -158,25 +161,42 @@ def gemini_vision_extract(base64_images_list):
     except Exception as e:
         return f"Gemini 辨識發生異常: {str(e)}"
 
-def convert_punctuation_to_words(text):
-    text = text.replace("，", "逗號").replace(",", "逗號")
-    text = text.replace("。", "句號")
-    text = text.replace("！", "感嘆號")
-    text = text.replace("？", "問號")
-    text = text.replace("；", "分號")
-    text = text.replace("：", "冒號")
-    text = text.replace("、", "頓號")
-    text = text.replace("《", "開書名號").replace("》", "關書名號")
-    text = text.replace("「", "開引號").replace("」", "關引號")
-    text = text.replace("『", "開引號").replace("』", "關引號")
-    text = text.replace("“", "開引號").replace("”", "關引號")
-    text = text.replace("——", "破折號")
+def convert_punctuation_to_words_bilingual(text, mode="中文"):
+    """根據中英文模式，自動將標點符號轉化為對應的聽寫口令"""
+    if mode == "中文":
+        # 🟢 震撼修正：書名號完美重回歷史舞台！
+        text = text.replace("《", "開書名號").replace("》", "關書名號")
+        text = text.replace("，", "逗號").replace(",", "逗號")
+        text = text.replace("。", "句號").replace(".", "句號")
+        text = text.replace("！", "感嘆號").replace("!", "感嘆號")
+        text = text.replace("？", "問號").replace("?", "問號")
+        text = text.replace("；", "分號").replace(";", "分號")
+        text = text.replace("：", "冒號").replace(":", "冒號")
+        text = text.replace("、", "頓號")
+        text = text.replace("「", "開引號").replace("」", "關引號")
+        text = text.replace("“", "開引號").replace("”", "關引號")
+    else:
+        text = text.replace(".", " full stop ").replace("。", " full stop ")
+        text = text.replace(",", " comma ").replace("，", " comma ")
+        text = text.replace("!", " exclamation mark ").replace("！", " exclamation mark ")
+        text = text.replace("?", " question mark ").replace("？", " question mark ")
+        text = text.replace(";", " semicolon ").replace("；", " semicolon ")
+        text = text.replace(":", " colon ").replace("：", " colon ")
+        
+        quote_count = 0
+        def replace_quote(match):
+            nonlocal quote_count
+            quote_count += 1
+            return " open inverted commas " if quote_count % 2 != 0 else " close inverted commas "
+        text = re.sub(r'["“”]', replace_quote, text)
+        
     return text
 
-async def generate_audio_clean_raw(speak_text, custom_rate="-60%"):
+async def generate_audio_clean_raw_bilingual(speak_text, custom_rate="-60%", mode="中文"):
     if not speak_text.strip(): return b""
     try:
-        communicate = edge_tts.Communicate(speak_text, "zh-CN-XiaoxiaoNeural", rate=custom_rate)
+        voice_model = "zh-CN-XiaoxiaoNeural" if mode == "中文" else "en-US-ZariNeural"
+        communicate = edge_tts.Communicate(speak_text, voice_model, rate=custom_rate)
         audio_data = b""
         async for chunk in communicate.stream():
             if chunk["type"] == "audio": audio_data += chunk["data"]
@@ -189,37 +209,54 @@ def generate_true_mp3_silence(seconds):
     single_frame = b"\xFF\xF3\x64\xC4" + (b"\x00" * 284)
     return single_frame * frames_needed
 
-def smart_split_sentence(text, target_len=14):
-    clean_text = text.replace("\r", "").replace("\n", "").strip()
-    protected = clean_text.replace("：「", "【冒引】").replace("：“", "【冒引】")
-    protected = protected.replace("。」", "【句引】").replace("」。", "【句引】")
-    protected = protected.replace("！”", "【感引】").replace("！」", "【感引】")
+def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
+    clean_text = text.replace("\r", "").strip()
     
-    strong_ends = ['。', '！', '？', '；', '——']
-    split_chars = ['，', '、']
-    
-    sub_sentences = []
-    current_chunk = ""
-    current_char_count = 0
-    
-    for char in protected:
-        current_chunk += char
-        if char not in (strong_ends + split_chars + ['《', '》', '·']):
-            current_char_count += 1
-            
-        if char in strong_ends or (current_char_count >= target_len and char in split_chars):
-            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」").replace("【感引】", "！”")
-            if chunk_restore.strip(): sub_sentences.append(chunk_restore.strip())
-            current_chunk = ""
-            current_char_count = 0
-            
-    if current_chunk.strip():
-        chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」").replace("【感引】", "！”")
-        sub_sentences.append(chunk_restore.strip())
+    if mode == "中文":
+        protected = clean_text.replace("：「", "【冒引】").replace("：“", "【冒引】")
+        protected = protected.replace("。」", "【句引】").replace("」。", "【句引】")
+        # 🟢 書名號切分防線
+        protected = protected.replace("《", "【開書名】").replace("》", "【關書名】")
+        
+        strong_ends = ['。', '！', '？', '；', '——']
+        split_chars = ['，', '、']
+        
+        sub_sentences = []
+        current_chunk = ""
+        current_char_count = 0
+        
+        for char in protected:
+            current_chunk += char
+            if char not in (strong_ends + split_chars + ['·']):
+                current_char_count += 1
+            if char in strong_ends or (current_char_count >= target_len and char in split_chars):
+                chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」")
+                chunk_restore = chunk_restore.replace("【開書名】", "《").replace("【關書名】", "》")
+                if chunk_restore.strip(): sub_sentences.append(chunk_restore.strip())
+                current_chunk = ""
+                current_char_count = 0
+        if current_chunk.strip():
+            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」")
+            chunk_restore = chunk_restore.replace("【開書名】", "《").replace("【關書名】", "》")
+            sub_sentences.append(chunk_restore)
+    else:
+        sentences = re.split(r'([\.!\?;\n]+)', clean_text)
+        sub_sentences = []
+        temp = ""
+        for item in sentences:
+            if not item: continue
+            if re.match(r'[\.!\?;\n]+', item):
+                temp += item
+                sub_sentences.append(temp.strip())
+                temp = ""
+            else:
+                temp += item
+        if temp.strip(): sub_sentences.append(temp.strip())
         
     final_sentences = []
     for s in sub_sentences:
-        if final_sentences and s[0] in ['，', '、', '。', '！', '？', '；', '：', '」', '》', '』', '”']:
+        if not s.strip(): continue
+        if final_sentences and s[0] in ['，', '、', '。', '！', '？', '；', '：', '」', '》', ',', '.', '!', '?', ';', ':']:
             final_sentences[-1] = final_sentences[-1] + s
         else:
             final_sentences.append(s)
@@ -229,7 +266,7 @@ def smart_split_sentence(text, target_len=14):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能普通話默書機 v1.8.3-StreamingPro")
+st.title("📖 智能中英雙語默書聽寫機 v1.9.2")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -244,7 +281,7 @@ if not st.session_state["authenticated"]:
     if st.button("確認登入"):
         if pwd_input == "royroy":
             st.session_state["authenticated"] = True
-            st.success("🔓 驗證成功！正在解鎖默書機...")
+            st.success("🔓 驗證成功！正在解鎖雙語默書機...")
             time.sleep(0.5)
             st.rerun()
         else:
@@ -252,27 +289,31 @@ if not st.session_state["authenticated"]:
     st.stop()
 
 # ==========================================================
-# 🔓 解鎖後的完整介面
+# 🔓 解鎖後的雙語介面
 # ==========================================================
 current_text = read_from_vault()
 text_hash = str(len(current_text)) + "_" + str(hash(current_text))
 
-tab1, tab2, tab3 = st.tabs(["📸 1. Gemini 核心智能影相辨識", "✍️ 2. 雲端舊課文載入與修改", "📢 3. 曉曉老師聽寫專區"])
+tab1, tab2, tab3 = st.tabs(["📸 1. Gemini 雙語影相辨識", "✍️ 2. 雲端舊課文載入與修改", "📢 3. 曉曉/佐伊老師聽寫專區"])
 
 with tab1:
-    st.subheader("📸 拍下課本圖片（由 Gemini 大腦強勢過濾拼音、100%防加戲）")
-    files = st.file_uploader("請上傳或拍攝課文圖片（可多選組合）：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="up_t1")
+    st.subheader("📸 拍下課本圖片（自動偵測中英文）")
+    
+    lang_mode = st.radio("請選擇當前默書科目：", ["🇨🇳 繁體中文普通話", "🇬🇧 英語 English"], horizontal=True)
+    mode_label = "中文" if "中文" in lang_mode else "英文"
+    
+    files = st.file_uploader("請上傳或拍攝課文圖片（支援多選）：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="up_t1")
     if files:
         cols = st.columns(min(len(files), 5))
         for i, f in enumerate(files): cols[i % 5].image(Image.open(f), use_container_width=True)
             
-        if st.button("🚀 執行 Gemini 視覺直讀識別（秒殺一切拼音雜訊）", key="ocr_btn_t1"):
-            with st.spinner("🔮 Google Gemini 視覺大腦正全速透視大字中，請稍候..."):
+        if st.button("🚀 啟動 Gemini 視覺大腦識別", key="ocr_btn_t1"):
+            with st.spinner(f"🔮 Gemini 視覺中樞正以【{lang_mode}】規格透視課文中..."):
                 b64_list = [convert_image_to_base64(f) for f in files]
-                clean_extracted_text = gemini_vision_extract(b64_list)
+                clean_extracted_text = gemini_vision_extract_bilingual(b64_list, mode=mode_label)
                 write_to_vault(clean_extracted_text)
                 st.session_state["instant_audio_bytes"] = None
-                st.success("✨ Gemini 完美原文已成功解鎖，請在下方查看！")
+                st.success("✨ 原文課文已成功完美解鎖！")
                 st.rerun()
                 
     t1 = st.text_area("課文內容 Text Box (AI 識別後可在此進行檢查微調)", value=current_text, height=250, key=f"t1_{text_hash}")
@@ -280,7 +321,7 @@ with tab1:
 
     st.subheader("💾 將新識別的課文儲存到雲端")
     c1, c2 = st.columns([3, 1])
-    with c1: title_t1 = st.text_input("請輸入課文標題：", placeholder="例如：半杯水", key="title_t1")
+    with c1: title_t1 = st.text_input("請輸入課文標題：", placeholder="例如：The_Crocodile_Hunter", key="title_t1")
     with c2:
         st.write(" ")
         st.write(" ")
@@ -316,7 +357,7 @@ with tab2:
                         write_to_vault("") 
                         st.session_state["current_lesson_title"] = ""
                         st.session_state["instant_audio_bytes"] = None
-                        st.success(f"✨ 剷除成功！《{sel}》的文字檔及雲端聲帶快取已被永久消滅！")
+                        st.success(f"✨ 剷除成功！《{sel}》的文字檔檔已被永久消滅！")
                         time.sleep(1)
                         st.rerun()
             
@@ -337,12 +378,14 @@ with tab2:
                     st.session_state["instant_audio_bytes"] = None
                     st.success("成功同步至 GitHub 雲端！")
 
-# --- Tab 3: 聽寫專區 (🚀 Raw 網址直通秒播版) ---
 with tab3:
-    st.subheader("📢 曉曉老師聽寫默書專區")
+    st.subheader("📢 智能雙語聽寫默書專區")
+    
+    play_mode = st.radio("請指定本課發音語系規格：", ["🇨🇳 普通話模式 (曉曉老師)", "🇬🇧 英語模式 (佐伊老師 - Full stop版)"], horizontal=True)
+    active_lang = "中文" if "普通話" in play_mode else "英文"
     
     lessons_t3 = load_all_lessons()
-    sel_t3 = st.selectbox("📂 聽寫專區直接選取雲端舊課文：", ["-- 請選擇課文 --"] + lessons_t3, key="select_t3")
+    sel_t3 = st.selectbox("📂 直接選取雲端舊課文：", ["-- 請選擇課文 --"] + lessons_t3, key="select_t3")
     if st.button("📥 確認切換並載入聽寫課文", key="load_btn_t3"):
         if sel_t3 != "-- 請選擇課文 --":
             write_to_vault(load_single_lesson(sel_t3))
@@ -351,14 +394,10 @@ with tab3:
             st.rerun()
             
     st.markdown("---")
-    st.markdown("#### ⚙️ 曉曉老師發音參數調節面板")
+    st.markdown("#### ⚙️ 老師發音參數調節面板")
     speed_percent = st.slider(
-        "請調較曉曉老師的普通話語速（僅用於全新生成）：", 
-        min_value=-80, 
-        max_value=0, 
-        value=-60, 
-        step=5,
-        format="%d%%"
+        "請調較老師的聽寫語速（僅用於全新生成）：", 
+        min_value=-80, max_value=0, value=-60, step=5, format="%d%%"
     )
     custom_rate_str = f"{speed_percent}%"
     
@@ -384,11 +423,11 @@ with tab3:
         
         dictation_units = []
         for p_idx, p_text in enumerate(raw_paragraphs):
-            p_sentences = smart_split_sentence(p_text)
+            p_sentences = smart_split_sentence_bilingual(p_text, mode=active_lang)
             for s_idx, s_text in enumerate(p_sentences):
                 if s_text.strip():
-                    p_label = f"第{p_idx + 1}段" if s_idx == 0 else ""
-                    dictation_units.append((p_label, s_text))
+                    p_label = f"Paragraph {p_idx + 1}" if active_lang == "英文" else f"第{p_idx + 1}段"
+                    dictation_units.append((p_label if s_idx == 0 else "", s_text))
         
         st.markdown("---")
         st.markdown("### 🎵 雲端已存音軌快取庫 (多速度點播面板)")
@@ -401,13 +440,10 @@ with tab3:
                 st.success(f"✨ 成功在雲端搵到 {len(cached_tracks)} 個不同語速的版本！想播邊個直接撳 Play：")
                 for speed_text, filename in cached_tracks:
                     with st.expander(f"▶️ 點擊展開點播：【語速 {speed_text}】完整聽寫連續軌", expanded=True):
-                        # 🟢 終極修正：生成無懈可擊的 Raw 網址，直接塞給播放器，徹底解決中文字加載失敗！
                         raw_stream_url = generate_raw_github_url(filename)
                         st.audio(raw_stream_url, format="audio/mp3")
             else:
                 st.info("💡 雲端目前尚未有任何語速的音軌快取。請在下方進行【全新生成】。")
-        else:
-            st.info("💡 請先在上方選取並確認載入課文，即可透視雲端快取庫。")
             
         st.markdown("---")
         st.markdown(f"#### 🚀 產生新快取：全篇自動連續聽寫（當前設定語速 {custom_rate_str}）")
@@ -417,7 +453,7 @@ with tab3:
             st.audio(st.session_state["instant_audio_bytes"], format="audio/mp3")
 
         if st.button("🏁 一鍵產生【整篇連續默書】音軌", key="play_all_btn"):
-            progress_text = f"曉曉老師正在以【{custom_rate_str}】語速全速封裝最高規格聽寫軌中，請稍候..."
+            progress_text = f"正在以【{custom_rate_str}】語速全速封裝最高規格【{active_lang}】聽寫軌中..."
             my_bar = st.progress(0, text=progress_text)
             
             loop = asyncio.new_event_loop()
@@ -432,22 +468,26 @@ with tab3:
             
             for idx, (p_label, s_text) in enumerate(dictation_units):
                 pct = int(((idx) / total_lines) * 100)
-                my_bar.progress(pct, text=f"⏳ 正在以 {custom_rate_str} 合成第 {idx+1}/{total_lines} 句...")
+                my_bar.progress(pct, text=f"⏳ 正在合成第 {idx+1}/{total_lines} 句...")
                 
-                text_with_breathes = convert_punctuation_to_words(s_text)
-                blocks = [b.strip() for b in re.split(r'(逗號|句號|感嘆號|問號|分號|冒號|頓號|開書名號|關書名號|開引號|關引號|破折號)', text_with_breathes) if b.strip()]
+                text_with_breathes = convert_punctuation_to_words_bilingual(s_text, mode=active_lang)
+                
+                if active_lang == "中文":
+                    blocks = [b.strip() for b in re.split(r'(開書名號|關書名號|逗號|句號|感嘆號|問號|分號|冒號|頓號|開引號|關引號)', text_with_breathes) if b.strip()]
+                else:
+                    blocks = [b.strip() for b in re.split(r'(comma|full stop|exclamation mark|question mark|semicolon|colon|open inverted commas|close inverted commas)', text_with_breathes) if b.strip()]
                 
                 sentence_audio_stream = b""
                 for blk in blocks:
-                    blk_clean = re.sub(r'[\s·\裝]', '', blk)
-                    blk_audio = loop.run_until_complete(generate_audio_clean_raw(blk_clean, custom_rate=custom_rate_str))
+                    blk_clean = re.sub(r'[\s·\裝]', '', blk) if active_lang == "中文" else blk.strip()
+                    blk_audio = loop.run_until_complete(generate_audio_clean_raw_bilingual(blk_clean, custom_rate=custom_rate_str, mode=active_lang))
                     if blk_audio:
                         sentence_audio_stream += blk_audio + silence_0_5s
                 
                 if sentence_audio_stream:
                     unit_stream = b""
                     if p_label:
-                        label_audio = loop.run_until_complete(generate_audio_clean_raw(p_label, custom_rate="-30%"))
+                        label_audio = loop.run_until_complete(generate_audio_clean_raw_bilingual(p_label, custom_rate="-30%", mode=active_lang))
                         if label_audio: unit_stream += label_audio + silence_0_5s
                     
                     unit_stream += sentence_audio_stream + silence_4_0s + sentence_audio_stream + silence_8_0s
@@ -462,7 +502,7 @@ with tab3:
                 st.session_state["instant_audio_bytes"] = full_mp3
                 
                 if active_title:
-                    with st.spinner(f"💾 正在自動將完美音軌上傳為雲端 【{custom_rate_str}】 語速快取存檔..."):
+                    with st.spinner(f"💾 正在自動將完美音軌上傳為雲端快取..."):
                         save_audio_to_github(active_title, str(speed_percent), full_mp3)
                 
                 st.success(f"✨ 備份成功！【{custom_rate_str}】語速音軌已送往雲端，請等待 2 秒後重新整理網頁！")
@@ -473,7 +513,7 @@ with tab3:
                 my_bar.empty()
             
         st.markdown("---")
-        st.markdown("#### 🎯 自由控速區：一句句單獨加操 (根據上面調節面板語速)")
+        st.markdown("#### 🎯 自由控速區：一句句單獨加操")
         for idx, (p_label, s_text) in enumerate(dictation_units):
             display_text = f"【{p_label}】{s_text}" if p_label else s_text
             col_text, col_audio = st.columns([4, 2])
@@ -488,18 +528,21 @@ with tab3:
                         silence_4_0s = generate_true_mp3_silence(4.0)
                         silence_8_0s = generate_true_mp3_silence(8.0)
                         
-                        text_with_breathes = convert_punctuation_to_words(s_text)
-                        blocks = [b.strip() for b in re.split(r'(逗號|句號|感嘆號|問號|分號|冒號|頓號|開書名號|關書名號|開引號|關引號|破折號)', text_with_breathes) if b.strip()]
+                        text_with_breathes = convert_punctuation_to_words_bilingual(s_text, mode=active_lang)
+                        if active_lang == "中文":
+                            blocks = [b.strip() for b in re.split(r'(開書名號|關書名號|逗號|句號|感嘆號|問號|分號|冒號|頓號|開引號|關引號)', text_with_breathes) if b.strip()]
+                        else:
+                            blocks = [b.strip() for b in re.split(r'(comma|full stop|exclamation mark|question mark|semicolon|colon|open inverted commas|close inverted commas)', text_with_breathes) if b.strip()]
                         
                         sentence_audio_stream = b""
                         for blk in blocks:
-                            blk_clean = re.sub(r'[\s·\裝]', '', blk)
-                            blk_audio = loop.run_until_complete(generate_audio_clean_raw(blk_clean, custom_rate=custom_rate_str))
+                            blk_clean = re.sub(r'[\s·\裝]', '', blk) if active_lang == "中文" else blk.strip()
+                            blk_audio = loop.run_until_complete(generate_audio_clean_raw_bilingual(blk_clean, custom_rate=custom_rate_str, mode=active_lang))
                             if blk_audio: sentence_audio_stream += blk_audio + silence_0_5s
                         
                         unit_stream = b""
                         if p_label:
-                            label_audio = loop.run_until_complete(generate_audio_clean_raw(p_label, custom_rate="-30%"))
+                            label_audio = loop.run_until_complete(generate_audio_clean_raw_bilingual(p_label, custom_rate="-30%", mode=active_lang))
                             if label_audio: unit_stream += label_audio + silence_0_5s
                         
                         if sentence_audio_stream:
