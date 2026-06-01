@@ -3,6 +3,7 @@ import requests
 import json
 import base64
 import markdown
+import time
 
 # ==========================================
 # 0. 網頁基本設定與【密碼鎖邏輯】
@@ -34,8 +35,8 @@ if not st.session_state['authenticated']:
 # ==========================================
 # 主程式 (只有解鎖後才會執行)
 # ==========================================
-# 🆕 版本號跳升至 v1.0.2，代表換成了更穩定避開塞車的 1.5 Flash
-st.title("📚 香港小學測驗/考試卷生成工具 v1.0.2")
+# 🆕 版本號跳升至 v1.0.3，採用 2.5 Flash + 智慧自動重試機制
+st.title("📚 香港小學測驗/考試卷生成工具 v1.0.3")
 
 # ==========================================
 # 1. 安全金鑰設定 (完美對接默書機的 Secrets)
@@ -147,11 +148,11 @@ if st.button("📦 儲存並打包資料到 GitHub"):
             st.success(f"🎉 打包成功！所有資料已安全儲存。")
 
 # ==========================================
-# 4. 核心功能：【避開超載塞車】切換至穩定版 Gemini 1.5 Flash
+# 4. 核心功能：【智慧自動重試】直連 Gemini 2.5 Flash
 # ==========================================
 st.subheader("✨ 4. 生成測驗/考試卷")
 if st.button("🚀 開始利用 Gemini AI 製作試卷"):
-    with st.spinner("🚀 穩定版 Gemini 1.5 Flash 正在為您快速出題中，請稍候..."):
+    with st.spinner("🚀 智能 Gemini 2.5 Flash 正在為您出題中（如遇伺服器擁堵會自動重試），請稍候..."):
         
         # 建立強大的出卷 Prompt
         prompt_text = f"你是一位熟知香港小學課程與考試制度的資深小學老師。請為【香港小學{grade}】的學生，製作一份符合教育局課程指引且難易度適中的【{subject}】科測驗/考試卷。\n"
@@ -167,8 +168,8 @@ if st.button("🚀 開始利用 Gemini AI 製作試卷"):
         請使用清晰的 Markdown 格式輸出。
         """
         
-        # 🚀 終極抗塞車修正：改用更暢通無阻、不塞車的「gemini-1.5-flash」模型
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_TOKEN}"
+        # 鎖定 100% 支援的 2.5 Flash
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
         headers = {"Content-Type": "application/json"}
         payload = {
             "contents": [
@@ -178,16 +179,35 @@ if st.button("🚀 開始利用 Gemini AI 製作試卷"):
             ]
         }
         
-        try:
-            res = requests.post(api_url, headers=headers, json=payload)
-            if res.status_code == 200:
-                res_json = res.json()
-                ai_result = res_json['candidates'][0]['content']['parts'][0]['text']
-                st.session_state['generated_exam'] = ai_result
-            else:
-                st.error(f"❌ Gemini 1.5 Flash 伺服器拒絕請求 (錯誤代碼 {res.status_code}): {res.text}")
-        except Exception as e:
-            st.error(f"❌ 聯絡 Gemini 1.5 Flash 伺服器失敗: {str(e)}")
+        # 🔄 智慧重試核心邏輯
+        max_retries = 3
+        success = False
+        
+        for attempt in range(max_retries):
+            try:
+                res = requests.post(api_url, headers=headers, json=payload)
+                if res.status_code == 200:
+                    res_json = res.json()
+                    ai_result = res_json['candidates'][0]['content']['parts'][0]['text']
+                    st.session_state['generated_exam'] = ai_result
+                    success = True
+                    break  # 成功了就跳出循環
+                elif res.status_code == 503 and attempt < max_retries - 1:
+                    # 如果遇到 503 超載，等待 3 秒後自動重試
+                    st.warning(f"⚠️ 伺服器目前較為繁忙（503），正在進行第 {attempt + 1} 次自動重新連線...")
+                    time.sleep(3)
+                else:
+                    st.error(f"❌ Gemini 2.5 Flash 伺服器拒絕請求 (錯誤代碼 {res.status_code}): {res.text}")
+                    break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(3)
+                else:
+                    st.error(f"❌ 聯絡 Gemini 伺服器失敗: {str(e)}")
+                    break
+                    
+        if success:
+            st.rerun() # 成功後刷新網頁展現成果
 
 # --- 試卷預覽與打印 ---
 if st.session_state['generated_exam']:
