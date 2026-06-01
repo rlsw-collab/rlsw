@@ -163,6 +163,7 @@ def gemini_vision_extract_bilingual(base64_images_list, mode="中文"):
 
 def convert_punctuation_to_words_bilingual(text, mode="中文"):
     if mode == "中文":
+        text = text.replace("——", "破折號")
         text = text.replace("《", "開書名號").replace("》", "關書名號")
         text = text.replace("，", "逗號").replace(",", "逗號")
         text = text.replace("。", "句號").replace(".", "句號")
@@ -230,8 +231,9 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
         protected = clean_text.replace("：「", "【冒引】").replace("：“", "【冒引】")
         protected = protected.replace("。」", "【句引】").replace("」。", "【句引】")
         protected = protected.replace("《", "【開書名】").replace("》", "【關書名】")
+        protected = protected.replace("——", "【破折】")
         
-        strong_ends = ['。', '！', '？', '；', '——']
+        strong_ends = ['。', '！', '？', '；']
         split_chars = ['，', '、']
         
         sub_sentences = []
@@ -245,12 +247,14 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
             if char in strong_ends or (current_char_count >= target_len and char in split_chars):
                 chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」")
                 chunk_restore = chunk_restore.replace("【開書名】", "《").replace("【關書名】", "》")
+                chunk_restore = chunk_restore.replace("【破折】", "——")
                 if chunk_restore.strip(): sub_sentences.append(chunk_restore.strip())
                 current_chunk = ""
                 current_char_count = 0
         if current_chunk.strip():
             chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」")
             chunk_restore = chunk_restore.replace("【開書名】", "《").replace("【關書名】", "》")
+            chunk_restore = chunk_restore.replace("【破折】", "——")
             sub_sentences.append(chunk_restore)
             
         final_sentences = []
@@ -263,14 +267,8 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
         return final_sentences
         
     else:
-        # 🇬🇧 英國英文默書專用：智能連詞與關係詞微切句引擎 v2
         protected = clean_text.replace("e.g.", "【EG】").replace("i.e.", "【IE】")
-        
-        # 🌟 核心突破：除了按標點切之外，同時捕捉無標點長句裡的關鍵連詞 (that, when, because, if, which, and)
-        # 用正則在特定的關鍵字前面標記一個特殊切分符 【SPLIT】，但前提是前面要有空格
-        # 我們只在 " that ", " when ", " because ", " if ", " which ", " and " 前面切開
         conjunctions = ['that', 'when', 'because', 'if', 'which', 'and']
-        
         tokens_raw = re.split(r'(?<=[\.!\?;\s,])', protected)
         
         sub_sentences = []
@@ -278,12 +276,9 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
         
         for token in tokens_raw:
             if not token: continue
-            
-            # 檢查目前積累的字數
             current_words = current_chunk.split()
             token_clean = token.strip().lower()
             
-            # 🌟 如果目前句子已經累積超過 8 個字，而且下一個單字是連詞，就進行「預防性切句」
             if len(current_words) >= 8 and token_clean in conjunctions and current_chunk.strip()[-1] not in ['.', '!', '?', ';', ',']:
                 if current_chunk.strip():
                     sub_sentences.append(current_chunk.strip().replace("【EG】", "e.g.").replace("【IE】", "i.e."))
@@ -294,10 +289,9 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
             clean_chunk = current_chunk.strip()
             if clean_chunk:
                 last_char = clean_chunk[-1]
-                if last_char in ['"', '”', '’', "'"] and len(clean_chunk) > 1:
+                if last_char in ['"', '装', '’', "'"] and len(clean_chunk) > 1:
                     last_char = clean_chunk[-2]
                 
-                # 遇到常規句尾標點或逗號
                 if last_char in ['.', '!', '?', ';'] or (last_char == ',' and len(current_chunk.split()) >= 5):
                     sub_sentences.append(current_chunk.strip().replace("【EG】", "e.g.").replace("【IE】", "i.e."))
                     current_chunk = ""
@@ -305,7 +299,6 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
         if current_chunk.strip():
             sub_sentences.append(current_chunk.strip().replace("【EG】", "e.g.").replace("【IE】", "i.e."))
             
-        # 二次安全過濾：將切得太碎（少於3個字）且不帶標點的碎片重新黏合
         merged_sentences = []
         for s in sub_sentences:
             if not merged_sentences:
@@ -322,7 +315,7 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能中英雙語默書聽寫機 v1.10.1")
+st.title("📖 智能中英雙語默書聽寫機 v1.11.0")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -427,7 +420,7 @@ with tab2:
     st.subheader("💾 重新儲存/覆蓋課文到雲端")
     c3, c4 = st.columns([3, 1])
     with c3:
-        default_name = sel if sel != "-- 請选择課文 --" else ""
+        default_name = sel if sel != "-- 請選擇課文 --" else ""
         title_t2 = st.text_input("請輸入課文標題：", value=default_name, key="title_t2")
     if st.button("💾 確認儲存至 Git", key="save_btn_t2"):
         if not title_t2.strip() or not t2.strip(): st.error("標題和內容不能為空！")
@@ -441,7 +434,8 @@ with tab2:
 with tab3:
     st.subheader("📢 智能雙語聽寫默書專區")
     
-    play_mode = st.radio("請指定本課發音語系規格：", ["🇨🇳 普通話模式 (曉曉老師)", "🇬🇧 英語模式 (Aria老師 - Full stop & Quotation版)"], horizontal=True)
+    # 🌟 UI 改良 1：移除冗長備註，簡化為 Aria 老師
+    play_mode = st.radio("請指定本課發音語系規格：", ["🇨🇳 普通話模式 (曉曉老師)", "🇬🇧 英語模式 (Aria老師)"], horizontal=True)
     active_lang = "中文" if "普通話" in play_mode else "英文"
     
     lessons_t3 = load_all_lessons()
@@ -456,11 +450,22 @@ with tab3:
     st.markdown("---")
     st.markdown("#### ⚙️ 老師發音參數調節面板")
     
-    speed_percent = st.slider(
-        "請調較老師的聽寫語速（僅用於全新生成）：", 
-        min_value=-80, max_value=0, value=-20, step=5, format="%d%%"
+    # 🌟 UI 改良 2 & 3：精簡語速標題，將 Slider 換成 4 個精準 Level 的 Radio
+    speed_level = st.radio(
+        "請調較老師的聽寫語速：",
+        ["快", "正常", "慢", "好慢"],
+        index=1, # 預設為正常
+        horizontal=True
     )
-    custom_rate_str = f"{speed_percent}%"
+    
+    # 將 4 個精準 Level 映射到 TTS 發音速率
+    speed_mapping = {
+        "快": ("0%", 0),
+        "正常": ("-20%", -20),
+        "慢": ("-30%", -30),
+        "好慢": ("-40%", -40)
+    }
+    custom_rate_str, speed_percent = speed_mapping[speed_level]
     
     st.markdown("---")
     st.markdown("#### 📖 當前準備默書的課文內容：")
@@ -509,14 +514,14 @@ with tab3:
             st.info("💡 請先在上方選取並確認載入課文，即可透視雲端快取庫。")
             
         st.markdown("---")
-        st.markdown(f"#### 🚀 產生新快取：全篇自動連續聽寫（當前設定語速 {custom_rate_str}）")
+        st.markdown(f"#### 🚀 產生新快取：全篇自動連續聽寫（當前設定：{speed_level}）")
         
         if st.session_state["instant_audio_bytes"] is not None:
-            st.warning(f"🔥 剛生成完畢！下方為【{custom_rate_str}】即時緩衝音軌（已同步至雲端，稍後刷新即可收入上方快取庫）：")
+            st.warning(f"🔥 剛生成完畢！下方為【{speed_level}】即時緩衝音軌（已同步至雲端，稍後刷新即可收入上方快取庫）：")
             st.audio(st.session_state["instant_audio_bytes"], format="audio/mp3")
 
         if st.button("🏁 一鍵產生【整篇連續默書】音軌", key="play_all_btn"):
-            progress_text = f"正在以【{custom_rate_str}】語速全速封裝最高規格【{active_lang}】聽寫軌中..."
+            progress_text = f"正在以【{speed_level}】語速全速封裝最高規格【{active_lang}】聽寫軌中..."
             my_bar = st.progress(0, text=progress_text)
             
             loop = asyncio.new_event_loop()
@@ -536,7 +541,7 @@ with tab3:
                 text_with_breathes = convert_punctuation_to_words_bilingual(s_text, mode=active_lang)
                 
                 if active_lang == "中文":
-                    blocks = [b.strip() for b in re.split(r'(開書名號|關書名號|逗號|句號|感嘆號|問號|分號|冒號|頓號|開引號|關引號)', text_with_breathes) if b.strip()]
+                    blocks = [b.strip() for b in re.split(r'(開書名號|關書名號|逗號|句號|感嘆號|問號|分號|冒號|頓號|開引號|關引號|破折號)', text_with_breathes) if b.strip()]
                 else:
                     blocks = [text_with_breathes.strip()]
                 
@@ -568,7 +573,7 @@ with tab3:
                     with st.spinner(f"💾 正在自動將完美音軌上傳為雲端快取..."):
                         save_audio_to_github(active_title, str(speed_percent), full_mp3)
                 
-                st.success(f"✨ 備份成功！【{custom_rate_str}】語速音軌已送往雲端，請等待 2 秒後重新整理網頁！")
+                st.success(f"✨ 備份成功！【{speed_level}】語速音軌已送往雲端，請等待 2 秒後重新整理網頁！")
                 time.sleep(2)
                 st.rerun()
             else: 
@@ -593,7 +598,7 @@ with tab3:
                         
                         text_with_breathes = convert_punctuation_to_words_bilingual(s_text, mode=active_lang)
                         if active_lang == "中文":
-                            blocks = [b.strip() for b in re.split(r'(開書名號|關書名號|逗號|句號|感嘆號|問號|分號|冒號|頓號|開引號|關引號)', text_with_breathes) if b.strip()]
+                            blocks = [b.strip() for b in re.split(r'(開書名號|關書名號|逗號|句號|感嘆號|問號|分號|冒號|頓號|開引號|關引號|破折號)', text_with_breathes) if b.strip()]
                         else:
                             blocks = [text_with_breathes.strip()]
                         
