@@ -263,47 +263,55 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
         return final_sentences
         
     else:
-        # 🌟 英國英文默書專用：智能逗號斷句引擎
+        # 🇬🇧 英國英文默書專用：智能連詞與關係詞微切句引擎 v2
         protected = clean_text.replace("e.g.", "【EG】").replace("i.e.", "【IE】")
         
-        # 將標點與後面的空格切開，但保留標點
-        tokens = re.split(r'(?<=[.!?;,])\s+', protected)
+        # 🌟 核心突破：除了按標點切之外，同時捕捉無標點長句裡的關鍵連詞 (that, when, because, if, which, and)
+        # 用正則在特定的關鍵字前面標記一個特殊切分符 【SPLIT】，但前提是前面要有空格
+        # 我們只在 " that ", " when ", " because ", " if ", " which ", " and " 前面切開
+        conjunctions = ['that', 'when', 'because', 'if', 'which', 'and']
+        
+        tokens_raw = re.split(r'(?<=[\.!\?;\s,])', protected)
         
         sub_sentences = []
         current_chunk = ""
         
-        for token in tokens:
-            if not token.strip(): continue
-            current_chunk += token + " "
-            word_count = len(current_chunk.split())
+        for token in tokens_raw:
+            if not token: continue
             
-            clean_chunk = current_chunk.strip()
-            last_char = clean_chunk[-1] if clean_chunk else ""
+            # 檢查目前積累的字數
+            current_words = current_chunk.split()
+            token_clean = token.strip().lower()
             
-            # 如果結尾是引號，檢查引號前面那個字是不是標點
-            if last_char in ['"', '”', '’', "'"] and len(clean_chunk) > 1:
-                last_char = clean_chunk[-2]
+            # 🌟 如果目前句子已經累積超過 8 個字，而且下一個單字是連詞，就進行「預防性切句」
+            if len(current_words) >= 8 and token_clean in conjunctions and current_chunk.strip()[-1] not in ['.', '!', '?', ';', ',']:
+                if current_chunk.strip():
+                    sub_sentences.append(current_chunk.strip().replace("【EG】", "e.g.").replace("【IE】", "i.e."))
+                current_chunk = token
+            else:
+                current_chunk += token
                 
-            # 遇到句尾大標點，必定切句
-            if last_char in ['.', '!', '?', ';']:
-                sub_sentences.append(current_chunk.strip().replace("【EG】", "e.g.").replace("【IE】", "i.e."))
-                current_chunk = ""
-            # 遇到逗號，且句子長度大於等於 5 個單字，切斷讓小朋友唞氣
-            elif last_char == ',':
-                if word_count >= 5:
+            clean_chunk = current_chunk.strip()
+            if clean_chunk:
+                last_char = clean_chunk[-1]
+                if last_char in ['"', '”', '’', "'"] and len(clean_chunk) > 1:
+                    last_char = clean_chunk[-2]
+                
+                # 遇到常規句尾標點或逗號
+                if last_char in ['.', '!', '?', ';'] or (last_char == ',' and len(current_chunk.split()) >= 5):
                     sub_sentences.append(current_chunk.strip().replace("【EG】", "e.g.").replace("【IE】", "i.e."))
                     current_chunk = ""
                     
         if current_chunk.strip():
             sub_sentences.append(current_chunk.strip().replace("【EG】", "e.g.").replace("【IE】", "i.e."))
             
-        # 二次防碎句過濾：如果切完得返少於 4 個字 (例如 Phuket, Thailand.)，智能合併返上一句
+        # 二次安全過濾：將切得太碎（少於3個字）且不帶標點的碎片重新黏合
         merged_sentences = []
         for s in sub_sentences:
             if not merged_sentences:
                 merged_sentences.append(s)
             else:
-                if len(s.split()) < 4 and not merged_sentences[-1].endswith(('.', '!', '?')): 
+                if len(s.split()) < 3 and not merged_sentences[-1].endswith(('.', '!', '?')): 
                     merged_sentences[-1] = merged_sentences[-1] + " " + s
                 else:
                     merged_sentences.append(s)
@@ -314,7 +322,7 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能中英雙語默書聽寫機 v1.10.0")
+st.title("📖 智能中英雙語默書聽寫機 v1.10.1")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -419,7 +427,7 @@ with tab2:
     st.subheader("💾 重新儲存/覆蓋課文到雲端")
     c3, c4 = st.columns([3, 1])
     with c3:
-        default_name = sel if sel != "-- 請選擇課文 --" else ""
+        default_name = sel if sel != "-- 請选择課文 --" else ""
         title_t2 = st.text_input("請輸入課文標題：", value=default_name, key="title_t2")
     if st.button("💾 確認儲存至 Git", key="save_btn_t2"):
         if not title_t2.strip() or not t2.strip(): st.error("標題和內容不能為空！")
