@@ -171,8 +171,12 @@ def convert_punctuation_to_words_bilingual(text, mode="中文"):
         text = text.replace("；", "分號").replace(";", "分號")
         text = text.replace("：", "冒號").replace(":", "冒號")
         text = text.replace("、", "頓號")
+        
+        # 🟢 全面覆蓋中文的單、雙引號
         text = text.replace("「", "開引號").replace("」", "關引號")
+        text = text.replace("『", "開引號").replace("』", "關引號")
         text = text.replace("“", "開引號").replace("”", "關引號")
+        text = text.replace("‘", "開引號").replace("’", "關引號")
     else:
         text = text.replace(".", " full stop ").replace("。", " full stop ")
         text = text.replace(",", " comma ").replace("，", " comma ")
@@ -181,13 +185,27 @@ def convert_punctuation_to_words_bilingual(text, mode="中文"):
         text = text.replace(";", " semicolon ").replace("；", " semicolon ")
         text = text.replace(":", " colon ").replace("：", " colon ")
         
-        # 🟢 完美切換為 Quotation Mark
+        # 🟢 完美處理英文單/雙引號，並設立 Apostrophe (撇號) 防護盾
+        # 1. 保護縮寫 (如 don't, I'm, it's)，將夾在字母中間的 ' 或 ’ 暫時替換
+        text = re.sub(r"([a-zA-Z])[’']([a-zA-Z])", r"\1【APOS】\2", text)
+        
+        # 2. 處理標準彎引號 (Smart Quotes)
+        text = text.replace("“", " open quotation mark ")
+        text = text.replace("”", " close quotation mark ")
+        text = text.replace("‘", " open quotation mark ")
+        text = text.replace("’", " close quotation mark ")
+        
+        # 3. 處理直引號 (Straight Quotes " 和 ')
         quote_count = 0
         def replace_quote(match):
             nonlocal quote_count
             quote_count += 1
             return " open quotation mark " if quote_count % 2 != 0 else " close quotation mark "
-        text = re.sub(r'["“”]', replace_quote, text)
+        
+        text = re.sub(r'["\']', replace_quote, text)
+        
+        # 4. 解除防護盾，還原 Apostrophe 為直撇號，等 Aria 老師識得連讀
+        text = text.replace("【APOS】", "'")
         
     return text
 
@@ -258,7 +276,7 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能中英雙語默書聽寫機 v1.9.7")
+st.title("📖 智能中英雙語默書聽寫機 v1.9.8")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -373,7 +391,6 @@ with tab2:
 with tab3:
     st.subheader("📢 智能雙語聽寫默書專區")
     
-    # 🔥 更新 UI 顯示名稱
     play_mode = st.radio("請指定本課發音語系規格：", ["🇨🇳 普通話模式 (曉曉老師)", "🇬🇧 英語模式 (Aria老師 - Full stop & Quotation版)"], horizontal=True)
     active_lang = "中文" if "普通話" in play_mode else "英文"
     
@@ -471,7 +488,6 @@ with tab3:
                 if active_lang == "中文":
                     blocks = [b.strip() for b in re.split(r'(開書名號|關書名號|逗號|句號|感嘆號|問號|分號|冒號|頓號|開引號|關引號)', text_with_breathes) if b.strip()]
                 else:
-                    # 🟢 完美將 open quotation mark 和 close quotation mark 加入英文防斷網
                     blocks = [text_with_breathes.strip()]
                 
                 sentence_audio_stream = b""
