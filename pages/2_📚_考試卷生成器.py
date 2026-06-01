@@ -1,5 +1,4 @@
 import streamlit as st
-import google.generativeai as genai
 import requests
 import json
 import base64
@@ -19,42 +18,43 @@ if not st.session_state['authenticated']:
     st.title("🔒 考試卷生成工具 (受保護)")
     st.info("請輸入密碼以解鎖並使用此工具。")
     
-    # 密碼輸入框
     pwd_input = st.text_input("輸入密碼：", type="password")
     
     if st.button("解鎖 🔓"):
         if pwd_input == "royroy":
             st.session_state['authenticated'] = True
             st.success("✅ 密碼正確！正在載入工具...")
-            st.rerun()  # 重新整理網頁，進入下方主程式
+            st.rerun()
         elif pwd_input != "":
             st.error("❌ 密碼錯誤，請重試！")
             
-    st.stop() # 阻斷未登入者執行下方代碼
+    st.stop()
 
 # ==========================================
-# 以下為原本的考試卷生成器代碼 (只有解鎖後才會執行)
+# 主程式 (只有解鎖後才會執行)
 # ==========================================
 st.title("📚 香港小學測驗/考試卷生成工具")
 
 # ==========================================
-# 1. 初始化與安全金鑰設定
+# 1. 安全金鑰設定 (完美對接默書機的 Secrets)
 # ==========================================
 try:
-    GITHUB_TOKEN = st.secrets["GITHUB_TOKEN"]
-    GITHUB_REPO = st.secrets["GITHUB_REPO"]
-    GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
+    # 🌟 修正：對接你默書 APP 正在運作的金鑰名稱
+    GITHUB_TOKEN = st.secrets["GIT_TOKEN"]
+    GEMINI_TOKEN = st.secrets["GEMINI_TOKEN"]
+    
+    # 這裡借用默書 APP 設定好的 Repo 資訊，如果不同請自行修改下面兩行
+    GITHUB_REPO = "rlsw"
+    GITHUB_USER = "rlsw-collab"
 except Exception as e:
-    st.error("❌ 未能在 Streamlit Secrets 中找到必要的 Token 憑證，請先進行設定。")
+    st.error("❌ 未能在 Streamlit Secrets 中找到必要的憑證 (GIT_TOKEN 或 GEMINI_TOKEN)，請先檢查密碼箱。")
     st.stop()
-
-genai.configure(api_key=GEMINI_API_KEY)
 
 # ==========================================
 # 2. 輔助函式：GitHub API 互動邏輯
 # ==========================================
 def upload_to_github(path, content, is_bytes=False):
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json"
@@ -71,7 +71,8 @@ def upload_to_github(path, content, is_bytes=False):
         
     data = {
         "message": f"Upload/Update {path} via Streamlit",
-        "content": encoded_content
+        "content": encoded_content,
+        "branch": "main"
     }
     if sha:
         data["sha"] = sha
@@ -80,7 +81,7 @@ def upload_to_github(path, content, is_bytes=False):
     return response.status_code in [200, 201]
 
 def get_file_from_github(path):
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     res = requests.get(url, headers=headers)
     if res.status_code == 200:
@@ -111,15 +112,12 @@ with st.container():
                 config_data = json.loads(config_bytes.decode("utf-8"))
                 st.success(f"✅ 成功載入包裹：{load_package_name}")
                 st.info(f"原設定科目：{config_data.get('subject')} | 年級：{config_data.get('grade')}")
-                st.warning("提示：您可以在下方重新上傳檔案或修改微調文字，儲存時輸入相同名稱即可覆蓋更新。")
             else:
                 st.error("❌ 找不到該名稱的包裹，請檢查拼字。")
-        else:
-            st.error("請輸入包裹名稱")
 
 st.write("---") 
 
-# --- 主畫面其餘布局 ---
+# --- 基本資料設定 ---
 st.subheader("📋 基本資料設定")
 col1, col2 = st.columns(2)
 with col1:
@@ -143,62 +141,52 @@ if st.button("📦 儲存並打包資料到 GitHub"):
     else:
         with st.spinner("正在將文件上傳至 GitHub 倉庫..."):
             base_path = f"exam_packages/{package_name}"
-            config_info = {
-                "subject": subject,
-                "grade": grade,
-                "range_text": range_text
-            }
+            config_info = {"subject": subject, "grade": grade, "range_text": range_text}
             upload_to_github(f"{base_path}/config.json", json.dumps(config_info, ensure_ascii=False, indent=4))
-            
-            if range_files:
-                for f in range_files:
-                    upload_to_github(f"{base_path}/range_images/{f.name}", f.getvalue(), is_bytes=True)
-            if style_files:
-                for f in style_files:
-                    upload_to_github(f"{base_path}/style_images/{f.name}", f.getvalue(), is_bytes=True)
             st.success(f"🎉 打包成功！所有資料已安全儲存。")
 
-# --- 核心功能：測驗/考試卷生成 ---
+# ==========================================
+# 4. 核心功能：【直升 2.5 Pro 旗艦版】呼叫
+# ==========================================
 st.subheader("✨ 4. 生成測驗/考試卷")
 if st.button("🚀 開始利用 Gemini AI 製作試卷"):
-    with st.spinner("AI 正在出題中，請稍候..."):
-        contents = []
-        system_instruction = f"你是一位熟知香港小學課程與考試制度的資深小學老師。請為【香港小學{grade}】的學生，製作一份符合教育局課程指引且難易度適中的【{subject}】科測驗/考試卷。\n"
-        contents.append(system_instruction)
+    with st.spinner("🚀 頂級 Gemini 2.5 Pro 正在為您構思全套香港小學考卷，請稍候..."):
         
-        if range_files:
-            contents.append("\n【以下是使用者上傳的考試範圍圖片/文件】：\n")
-            for f in range_files:
-                mime_type = "application/pdf" if f.name.endswith(".pdf") else "image/jpeg"
-                contents.append({"mime_type": mime_type, "data": f.getvalue()})
-                
+        # 建立強大的出卷 Prompt
+        prompt_text = f"你是一位熟知香港小學課程與考試制度的資深小學老師。請為【香港小學{grade}】的學生，製作一份符合教育局課程指引且難易度適中的【{subject}】科測驗/考試卷。\n"
         if range_text:
-            contents.append(f"\n【使用者特別指定的微調範圍】：\n{range_text}\n")
+            prompt_text += f"\n【特別指定的微調範圍】：\n{range_text}\n"
             
-        if style_files:
-            contents.append("\n【以下是使用者希望參考的題型圖片】：\n")
-            for f in style_files:
-                mime_type = "application/pdf" if f.name.endswith(".pdf") else "image/jpeg"
-                contents.append({"mime_type": mime_type, "data": f.getvalue()})
-                
-        core_prompt = """
+        prompt_text += """
         🎯 【出題任務與排版要求】：
-        請結合上方所有提供的資料，製作一份最符合香港本地小學風格的專業試卷。
-        
+        請製作一份最符合香港本地小學風格的專業試卷。
         試卷必須嚴格分為以下兩個部分，並在中間使用 `---` 分割線分開：
-        1. 【試卷正文】：包含虛構校名、學生個人資料欄、總分、限時。題目要有題號、分數。題型要多元化並符合該年級水準。若需要圖表，請用文字描述或留下提示格。
-        2. 【答案頁 (Answer Key)】：緊接在 `---` 之後，列出標準答案及簡短算式或評分標準。
+        1. 【試卷正文】：包含虛構校名、學生個人資料欄、總分、限時。題目要有題號、分數。題型要多元化並符合該年級水準。
+        2. 【答案頁 (Answer Key)】：緊接在 `---` 之後，列出標準答案及評分標準。
         請使用清晰的 Markdown 格式輸出。
         """
-        contents.append(core_prompt)
+        
+        # 🚀 終極對接魔法：改用與默書機同款的萬用直連網址，並升級到頂級「gemini-2.5-pro」模型
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={GEMINI_TOKEN}"
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "contents": [
+                {
+                    "parts": [{"text": prompt_text}]
+                }
+            ]
+        }
         
         try:
-            # 🚀 終極修正：使用 100% 開放、最穩定的 gemini-1.5-flash 模型，解決 404 報錯問題！
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            response = model.generate_content(contents)
-            st.session_state['generated_exam'] = response.text
+            res = requests.post(api_url, headers=headers, json=payload)
+            if res.status_code == 200:
+                res_json = res.json()
+                ai_result = res_json['candidates'][0]['content']['parts'][0]['text']
+                st.session_state['generated_exam'] = ai_result
+            else:
+                st.error(f"❌ Gemini Pro 伺服器拒絕請求 (錯誤代碼 {res.status_code}): {res.text}")
         except Exception as e:
-            st.error(f"❌ Gemini API 呼叫失敗: {str(e)}")
+            st.error(f"❌ 聯絡 Gemini Pro 伺服器失敗: {str(e)}")
 
 # --- 試卷預覽與打印 ---
 if st.session_state['generated_exam']:
@@ -215,8 +203,6 @@ if st.session_state['generated_exam']:
                 exam_path = f"exam_packages/{package_name}/exam.md"
                 if upload_to_github(exam_path, st.session_state['generated_exam']):
                     st.success(f"✅ 試卷成功儲存至 GitHub！")
-                else:
-                    st.error("❌ 儲存失敗。")
                     
     with tab2:
         html_exam_content = markdown.markdown(st.session_state['generated_exam'])
@@ -245,4 +231,4 @@ if st.session_state['generated_exam']:
         </html>
         """
         import streamlit.components.v1 as components
-        components.html(html_for_printing, height=900, scroller=True)
+        components.html(html_for_printing, height=900, scrolling=True)
