@@ -194,7 +194,7 @@ if st.button("🚀 開始利用 Gemini AI 製作試卷"):
         contents.append(core_prompt)
         
         try:
-            model = genai.GenerativeModel('gemini-1.5-pro')
+            model = genai.GenerativeModel('gemini-1.5-pro-latest')
             response = model.generate_content(contents)
             st.session_state['generated_exam'] = response.text
         except Exception as e:
