@@ -67,13 +67,13 @@ all_html_content = """
 <body>
 
 <div class="container">
-    <a href="/%E9%BB%98%E6%9B%B8%E5%B7%A5%E5%85%B7" target="_self" class="card">
+    <a href="/%E9%BB%98%E6%9B%B8%E5%B7%A5%E5%85%B7" target="_parent" class="card">
         <div class="icon">📝</div>
         <div class="title">默書工具</div>
         <div class="desc">智能語音讀默、自動對手寫稿、標準答案比對，輕鬆處理學生日常默書。</div>
     </a>
     
-    <a href="/%E8%80%83%E8%A9%A6%E5%8D%B7%E7%94%9F%E6%88%90%E5%99%A8" target="_self" class="card">
+    <a href="/%E8%80%83%E8%A9%A6%E5%8D%B7%E7%94%9F%E6%88%90%E5%99%A8" target="_parent" class="card">
         <div class="icon">📚</div>
         <div class="title">試卷生成器</div>
         <div class="desc">上傳課本目錄或工作紙，由 Gemini AI 自動生成香港小學本地風格的測驗考試卷連答案。</div>
@@ -84,7 +84,6 @@ all_html_content = """
 </html>
 """
 
-# 🚀 這裡已經修正為 scrolling=False
 components.html(all_html_content, height=420, scrolling=False)
 
 st.write("##")
