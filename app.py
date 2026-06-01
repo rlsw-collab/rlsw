@@ -252,24 +252,69 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
             chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」")
             chunk_restore = chunk_restore.replace("【開書名】", "《").replace("【關書名】", "》")
             sub_sentences.append(chunk_restore)
-    else:
-        sentences = re.split(r'(?<=[\.!\?;\n])\s+', clean_text)
-        sub_sentences = [s.strip() for s in sentences if s.strip()]
+            
+        final_sentences = []
+        for s in sub_sentences:
+            if not s.strip(): continue
+            if final_sentences and s[0] in ['，', '、', '。', '！', '？', '；', '：', '」', '》', ',', '.', '!', '?', ';', ':']:
+                final_sentences[-1] = final_sentences[-1] + s
+            else:
+                final_sentences.append(s)
+        return final_sentences
         
-    final_sentences = []
-    for s in sub_sentences:
-        if not s.strip(): continue
-        if final_sentences and s[0] in ['，', '、', '。', '！', '？', '；', '：', '」', '》', ',', '.', '!', '?', ';', ':']:
-            final_sentences[-1] = final_sentences[-1] + s
-        else:
-            final_sentences.append(s)
-    return final_sentences
+    else:
+        # 🌟 英國英文默書專用：智能逗號斷句引擎
+        protected = clean_text.replace("e.g.", "【EG】").replace("i.e.", "【IE】")
+        
+        # 將標點與後面的空格切開，但保留標點
+        tokens = re.split(r'(?<=[.!?;,])\s+', protected)
+        
+        sub_sentences = []
+        current_chunk = ""
+        
+        for token in tokens:
+            if not token.strip(): continue
+            current_chunk += token + " "
+            word_count = len(current_chunk.split())
+            
+            clean_chunk = current_chunk.strip()
+            last_char = clean_chunk[-1] if clean_chunk else ""
+            
+            # 如果結尾是引號，檢查引號前面那個字是不是標點
+            if last_char in ['"', '”', '’', "'"] and len(clean_chunk) > 1:
+                last_char = clean_chunk[-2]
+                
+            # 遇到句尾大標點，必定切句
+            if last_char in ['.', '!', '?', ';']:
+                sub_sentences.append(current_chunk.strip().replace("【EG】", "e.g.").replace("【IE】", "i.e."))
+                current_chunk = ""
+            # 遇到逗號，且句子長度大於等於 5 個單字，切斷讓小朋友唞氣
+            elif last_char == ',':
+                if word_count >= 5:
+                    sub_sentences.append(current_chunk.strip().replace("【EG】", "e.g.").replace("【IE】", "i.e."))
+                    current_chunk = ""
+                    
+        if current_chunk.strip():
+            sub_sentences.append(current_chunk.strip().replace("【EG】", "e.g.").replace("【IE】", "i.e."))
+            
+        # 二次防碎句過濾：如果切完得返少於 4 個字 (例如 Phuket, Thailand.)，智能合併返上一句
+        merged_sentences = []
+        for s in sub_sentences:
+            if not merged_sentences:
+                merged_sentences.append(s)
+            else:
+                if len(s.split()) < 4 and not merged_sentences[-1].endswith(('.', '!', '?')): 
+                    merged_sentences[-1] = merged_sentences[-1] + " " + s
+                else:
+                    merged_sentences.append(s)
+                    
+        return merged_sentences
 
 # ==========================================================
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能中英雙語默書聽寫機 v1.9.9")
+st.title("📖 智能中英雙語默書聽寫機 v1.10.0")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -320,7 +365,9 @@ with tab1:
                 st.rerun()
                 
     t1 = st.text_area("課文內容 Text Box (AI 識別後可在此進行檢查微調)", value=current_text, height=250, key=f"t1_{text_hash}")
-    if t1 != current_text: write_to_vault(t1)
+    if t1 != current_text: 
+        write_to_vault(t1)
+        current_text = t1
 
     st.subheader("💾 將新識別的課文儲存到雲端")
     c1, c2 = st.columns([3, 1])
@@ -328,7 +375,6 @@ with tab1:
     with c2:
         st.write(" ")
         st.write(" ")
-        # 🟢 修正：使用 t1 提交，不再使用 current_text
         if st.button("💾 確認儲存至 Git", key="save_btn_t1"):
             if not title_t1.strip() or not t1.strip(): st.error("標題和內容不能為空！")
             else:
@@ -366,14 +412,15 @@ with tab2:
                         st.rerun()
             
     t2 = st.text_area("課文內容 Text Box", value=current_text, height=250, key=f"t2_{text_hash}")
-    if t2 != current_text: write_to_vault(t2)
+    if t2 != current_text: 
+        write_to_vault(t2)
+        current_text = t2
     
     st.subheader("💾 重新儲存/覆蓋課文到雲端")
     c3, c4 = st.columns([3, 1])
     with c3:
         default_name = sel if sel != "-- 請選擇課文 --" else ""
         title_t2 = st.text_input("請輸入課文標題：", value=default_name, key="title_t2")
-    # 🟢 修正：使用 t2 提交，不再使用 current_text
     if st.button("💾 確認儲存至 Git", key="save_btn_t2"):
         if not title_t2.strip() or not t2.strip(): st.error("標題和內容不能為空！")
         else:
