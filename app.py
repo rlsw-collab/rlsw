@@ -190,13 +190,13 @@ def convert_punctuation_to_words_bilingual(text, mode="中文"):
         
     return text
 
-async def generate_audio_clean_raw_bilingual(speak_text, custom_rate="-60%", mode="中文"):
+async def generate_audio_clean_raw_bilingual(speak_text, custom_rate="-20%", mode="中文"):
     if not speak_text.strip(): return b""
     try:
-        # 🌟 核心修正：如果畫面上拉到 0% 語速，標準化為 Edge-TTS 認識的 "+0%"，防止後台拋錯崩潰
-        if custom_rate == "0%":
+        # 🌟🌟 終極全局防護網：徹底馴服 0% 和所有未格式化的語速字串 🌟🌟
+        if str(custom_rate).strip() == "0%":
             custom_rate = "+0%"
-        
+            
         voice_model = "zh-CN-XiaoxiaoNeural" if mode == "中文" else "en-US-ZariNeural"
         communicate = edge_tts.Communicate(speak_text, voice_model, rate=custom_rate)
         audio_data = b""
@@ -231,23 +231,24 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
             if char not in (strong_ends + split_chars + ['·']):
                 current_char_count += 1
             if char in strong_ends or (current_char_count >= target_len and char in split_chars):
-                chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "結構。」")
+                chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」")
                 chunk_restore = chunk_restore.replace("【開書名】", "《").replace("【關書名】", "》")
                 if chunk_restore.strip(): sub_sentences.append(chunk_restore.strip())
                 current_chunk = ""
                 current_char_count = 0
         if current_chunk.strip():
-            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "结构。」")
+            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」")
             chunk_restore = chunk_restore.replace("【開書名】", "《").replace("【關書名】", "》")
             sub_sentences.append(chunk_restore)
     else:
+        # 🇬🇧 依據英文句號標點平滑分割句子
         sentences = re.split(r'(?<=[\.!\?;\n])\s+', clean_text)
         sub_sentences = [s.strip() for s in sentences if s.strip()]
         
     final_sentences = []
     for s in sub_sentences:
         if not s.strip(): continue
-        if final_sentences and s[0] in ['，', '、', '。', '！', '？', '；', '：', '」', '役', ',', '.', '!', '?', ';', ':']:
+        if final_sentences and s[0] in ['，', '、', '。', '！', '？', '；', '：', '」', '》', ',', '.', '!', '?', ';', ':']:
             final_sentences[-1] = final_sentences[-1] + s
         else:
             final_sentences.append(s)
@@ -257,7 +258,7 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能中英雙語默書聽寫機 v1.9.4")
+st.title("📖 智能中英雙語默書聽寫機 v1.9.5")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -340,18 +341,17 @@ with tab2:
                 
     with c_del:
         if sel != "-- 請選擇課文 --":
-            if f"🗑️ 徹底刪除雲端課文及音軌快取":
-                if st.button("🗑️ 徹底刪除雲端課文及音軌快取", key="del_btn_t2", type="primary"):
-                    with st.spinner(f"💥 正在從雲端徹底剷除《{sel}》的文字與 MP3 檔..."):
-                        txt_ok = delete_from_github(sel)
-                        mp3_ok = delete_audio_from_github(sel)
-                        if txt_ok:
-                            write_to_vault("") 
-                            st.session_state["current_lesson_title"] = ""
-                            st.session_state["instant_audio_bytes"] = None
-                            st.success(f"✨ 剷除成功！《{sel}》的文字檔檔已被永久消滅！")
-                            time.sleep(1)
-                            st.rerun()
+            if st.button("🗑️ 徹底刪除雲端課文及音軌快取", key="del_btn_t2", type="primary"):
+                with st.spinner(f"💥 正在從雲端徹底剷除《{sel}》的文字與 MP3 檔..."):
+                    txt_ok = delete_from_github(sel)
+                    mp3_ok = delete_audio_from_github(sel)
+                    if txt_ok:
+                        write_to_vault("") 
+                        st.session_state["current_lesson_title"] = ""
+                        st.session_state["instant_audio_bytes"] = None
+                        st.success(f"✨ 剷除成功！《{sel}》的文字檔檔已被永久消滅！")
+                        time.sleep(1)
+                        st.rerun()
             
     t2 = st.text_area("課文內容 Text Box", value=current_text, height=250, key=f"t2_{text_hash}")
     if t2 != current_text: write_to_vault(t2)
@@ -388,7 +388,7 @@ with tab3:
     st.markdown("---")
     st.markdown("#### ⚙️ 老師發音參數調節面板")
     
-    # 🌟 核心升級：將預設值 value 由 -60 改為你最想要的黃金加操速 -20
+    # 🌟 預設值完美鎖定在你最愛的 -20%
     speed_percent = st.slider(
         "請調較老師的聽寫語速（僅用於全新生成）：", 
         min_value=-80, max_value=0, value=-20, step=5, format="%d%%"
@@ -438,6 +438,8 @@ with tab3:
                         st.audio(raw_stream_url, format="audio/mp3")
             else:
                 st.info("💡 雲端目前尚未有任何語速的音軌快取。請在下方進行【全新生成】。")
+        else:
+            st.info("💡 請先在上方選取並確認載入課文，即可透視雲端快取庫。")
             
         st.markdown("---")
         st.markdown(f"#### 🚀 產生新快取：全篇自動連續聽寫（當前設定語速 {custom_rate_str}）")
@@ -474,6 +476,7 @@ with tab3:
                 sentence_audio_stream = b""
                 for blk in blocks:
                     blk_clean = re.sub(r'[\s·\裝]', '', blk) if active_lang == "中文" else blk.strip()
+                    # 🟢 這裡已被全局防護網死死鎖定，0% 自動轉化為 +0%，絕對不崩潰
                     blk_audio = loop.run_until_complete(generate_audio_clean_raw_bilingual(blk_clean, custom_rate=custom_rate_str, mode=active_lang))
                     if blk_audio:
                         sentence_audio_stream += blk_audio + silence_0_5s
