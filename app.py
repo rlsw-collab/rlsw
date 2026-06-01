@@ -1,29 +1,39 @@
 import streamlit as st
+import streamlit.components.v1 as components
 
 # 設定網頁標題與排版
 st.set_page_config(page_title="AI 智能教學工具箱", layout="centered")
 
-# 主標題
+# 主標題 (保留 Streamlit 原生渲染，確保置中好看)
 st.markdown("<h1 style='text-align: center; color: #4A90E2;'>🎒 AI 智能教學工具箱</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center; color: #666; font-size: 18px;'>歡迎使用！請選擇您今天需要使用的教學輔助工具：</p>", unsafe_allow_html=True)
 st.write("##")
 
-# 準備 CSS 樣式
-custom_css = """
+# 🚀 將所有的 CSS 同 HTML 封裝成一個純網頁字串
+all_html_content = """
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
 <style>
+    body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background-color: transparent; /* 配合 Streamlit 的背景色 */
+    }
     .container {
         display: flex;
         gap: 25px;
         justify-content: center;
         flex-wrap: wrap;
-        margin-top: 20px;
+        padding: 10px;
     }
     .card {
         background-color: #f8f9fa;
         border: 2px solid #e9ecef;
         border-radius: 15px;
         padding: 30px;
-        width: 280px;
+        width: 260px;
         text-align: center;
         box-shadow: 0 4px 6px rgba(0,0,0,0.05);
         transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
@@ -53,11 +63,9 @@ custom_css = """
         line-height: 1.4;
     }
 </style>
-"""
-st.markdown(custom_css, unsafe_allow_html=True)
+</head>
+<body>
 
-# 🚀 使用你提供的精準編碼網址進行跳轉
-cards_html = """
 <div class="container">
     <a href="/%E9%BB%98%E6%9B%B8%E5%B7%A5%E5%85%B7" target="_self" class="card">
         <div class="icon">📝</div>
@@ -71,9 +79,13 @@ cards_html = """
         <div class="desc">上傳課本目錄或工作紙，由 Gemini AI 自動生成香港小學本地風格的測驗考試卷連答案。</div>
     </a>
 </div>
+
+</body>
+</html>
 """
 
-st.markdown(cards_html, unsafe_allow_html=True)
+# 使用 components.html 強制以純 HTML 渲染，徹底繞過 Streamlit Markdown Bug
+components.html(all_html_content, height=420, scroller=False)
 
 st.write("##")
 st.write("---")
