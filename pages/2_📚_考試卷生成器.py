@@ -14,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 修正語法錯誤，跳升至 v1.1.7 終極穩定版
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.1.7"
+# 🆕 徹底修復 State 鎖死 Bug，跳升至 v1.1.8
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.1.8"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -88,7 +88,7 @@ def convert_image_to_base64(file_val):
 
 def do_gemini_ocr(b64_list):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
-    prompt = "你是一個100%精準的繁體中文與英文打字掃描儀。請一字不漏、按照段落順序將圖片中的所有教學課文和題目文字抄寫下來。直接輸出純文字，不要加入任何解釋。"
+    prompt = "你是一個100%精準的繁體中文與英文打字掃描儀。請一字不漏、按照段落順序將圖片中的所有教學課文 and 題目文字抄寫下來。直接輸出純文字，不要加入任何解釋。"
     parts = [{"text": prompt}]
     for b64 in b64_list:
         parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
@@ -101,12 +101,10 @@ def do_gemini_ocr(b64_list):
     return "❌ 圖片辨識失敗，請重試或手動輸入。"
 
 # ==========================================
-# 🚀 🚀 Python 終極分數與視覺排版引擎 (v1.1.7 終極暴力進化版) 🚀 🚀
+# 🚀 🚀 Python 終極分數與視覺排版引擎 (v1.1.8 終極版) 🚀 🚀
 # ==========================================
 def convert_to_vertical_fractions(text_content):
-    """
-    暴力過濾器：無視數字邊界，直接將所有畸形連體字拆開並渲染
-    """
+    # 🔴 終極暴力修復：即使前後黏住了中文字，一樣強制切片
     text_content = text_content.replace("312", " 3 1/2 ")
     text_content = text_content.replace("213", " 2 1/3 ")
     text_content = text_content.replace("214", " 2 1/4 ")
@@ -118,7 +116,7 @@ def convert_to_vertical_fractions(text_content):
     text_content = text_content.replace("712", " 7 1/2 ")
     text_content = text_content.replace("56", " 5/6 ")
     
-    # 處理沒帶整數的 14 -> 1/4, 38 -> 3/8 (排除掉像題目編號「14.」或年份)
+    # 處理沒帶整數的分數
     text_content = re.sub(r'(?<!\d)(14)(?!\d|\.)', '1/4', text_content)
     text_content = re.sub(r'(?<!\d)(38)(?!\d|\.)', '3/8', text_content)
     text_content = re.sub(r'(?<!\d)(12)(?!\d|\.)', '1/2', text_content)
@@ -135,18 +133,14 @@ def python_layout_engine(raw_text, is_answer_key=False):
     processed_lines = []
     for line in lines:
         if not line.strip(): continue
-        
-        # 擦除 AI 自己亂吐的長底線
         line = re.sub(r'_{4,}', '', line)
         
-        # 選擇題選項 ○ A. ○ B. 強制換行
         if re.search(r'[○●]\s*[A-D]\.', line):
             if "●" in line: line = line.replace("●", '<span class="mc-ans">●</span>')
             line = convert_to_vertical_fractions(line)
             processed_lines.append(f'<div class="mc-option">{line}</div>')
             continue
             
-        # 填充題加短底線
         if "填空" in line or "填充" in line or (re.match(r'^\d+\.', line.strip()) and not re.search(r'[A-D]\.', line) and ("部" not in line) and ("題" not in line) and ("丙部" not in raw_text) and ("丁部" not in raw_text)):
             line = convert_to_vertical_fractions(line)
             if not is_answer_key:
@@ -154,7 +148,6 @@ def python_layout_engine(raw_text, is_answer_key=False):
             processed_lines.append(f'<div>{line}</div>')
             continue
 
-        # 計算題或應用題，題目後換行，鋪設 4 條虛線
         if re.match(r'^\d+\.', line.strip()) and ("丙部" in raw_text or "丁部" in raw_text or "應用題" in line or "計算" in line) and not re.search(r'[A-D]\.', line):
             line = convert_to_vertical_fractions(line)
             processed_lines.append(f'<div class="question-text">{line}</div>')
@@ -167,10 +160,10 @@ def python_layout_engine(raw_text, is_answer_key=False):
     return "\n".join(processed_lines)
 
 def process_full_exam(raw_gemini_output):
-    """🔴 智能容錯：如果 AI 漏了寫 '---'，後台自動強制切片分卷"""
-    if "---" not in raw_gemini_output and ("🔑 答案頁" in raw_gemini_output or "香港小學小五 數學科測驗 - 答案" in raw_gemini_output):
+    if "---" not in raw_gemini_output and ("🔑 答案頁" in raw_gemini_output or "數學科測驗 - 答案" in raw_gemini_output or "數學科測驗 – 答案" in raw_gemini_output):
         raw_gemini_output = raw_gemini_output.replace("🔑 答案頁", "---\n🔑 答案頁")
-        raw_gemini_output = raw_gemini_output.replace("香港小學小五 數學科測驗 - 答案", "---\n香港小學小五 數學科測驗 - 答案")
+        raw_gemini_output = raw_gemini_output.replace("數學科測驗 - 答案", "---\n數學科測驗 - 答案")
+        raw_gemini_output = raw_gemini_output.replace("數學科測驗 – 答案", "---\n數學科測驗 – 答案")
 
     if "---" in raw_gemini_output:
         parts = raw_gemini_output.split("---")
@@ -180,7 +173,6 @@ def process_full_exam(raw_gemini_output):
         else:
             exam_part = parts[0]
             ans_part = parts[1]
-            
         return python_layout_engine(exam_part, is_answer_key=False) + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁 (Answer Key)</h2>' + python_layout_engine(ans_part, is_answer_key=True)
     else:
         return python_layout_engine(raw_gemini_output, is_answer_key=False)
@@ -285,7 +277,6 @@ if btn_call_ai:
             試卷與答案頁中間使用 `---` 分割。"""
             
             contents.append(prompt_text)
-            
             if uploaded_files:
                 for f in uploaded_files:
                     mime_type = "application/pdf" if f.name.endswith(".pdf") else "image/jpeg"
@@ -302,7 +293,6 @@ if btn_call_ai:
                 if res.status_code == 200:
                     ai_text_result = res.json()['candidates'][0]['content']['parts'][0]['text']
                     st.session_state['generated_exam'] = ai_text_result
-                    st.session_state['exam_text_editor'] = ai_text_result
                     st.success("🎉 考卷題目已成功對接生成！已送入下方控制台暫存區。")
                     st.rerun()
                 else: st.error(f"❌ API 出題報錯: {res.text}")
@@ -311,20 +301,20 @@ if btn_call_ai:
 # 🧱 模組 5：題目原始碼暫存區
 st.write("---")
 st.header("📝 步驟三：題目原始碼暫存區")
+st.caption("💡 提示：你可以直接在這裡隨意修改出題字眼，或貼上之前的舊試卷，重刷網頁字也不會丟失。")
 
-if 'exam_text_editor' not in st.session_state:
-    st.session_state['exam_text_editor'] = st.session_state['generated_exam']
+# 🆕 完美合流安全回調函數（完美拔除打架 Bug）
+def on_editor_change():
+    st.session_state['generated_exam'] = st.session_state['exam_text_editor']
 
+# 核心安全綁定：用 on_change 與內置初始值完美過渡，不與底層組件衝突
 stored_text = st.text_area(
     "💻 試卷原始文本控制台：", 
-    value=st.session_state['exam_text_editor'], 
+    value=st.session_state['generated_exam'], 
     height=400, 
-    key="exam_text_editor"
+    key="exam_text_editor",
+    on_change=on_editor_change
 )
-
-if stored_text != st.session_state['generated_exam']:
-    st.session_state['generated_exam'] = stored_text
-    st.session_state['exam_text_editor'] = stored_text
 
 # 🧱 模組 6：純排版測試按鈕與導出區
 st.write("##")
@@ -357,7 +347,6 @@ if st.session_state['generated_exam']:
             #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; color: #000000; padding: 30px; font-size: 16px; line-height: 2.2; }}
             #exam-body p {{ margin-bottom: 16px; }}
             
-            /* 🚀 真正完美的直式分數 */
             .v-frac {{
                 display: inline-flex;
                 flex-direction: column;
