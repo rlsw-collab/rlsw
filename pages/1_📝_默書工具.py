@@ -3,6 +3,7 @@ import os
 import re
 import base64
 import requests
+import datetime
 from PIL import Image
 import io
 import streamlit as st
@@ -37,6 +38,68 @@ def read_from_vault():
     path = get_user_vault_path()
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
+# ==========================================
+# 🛡️ GitHub 雲端實時計數同步邏輯 (防衝突)
+# ==========================================
+def get_hkt_date_str():
+    tz_hkt = datetime.timezone(datetime.timedelta(hours=8))
+    return datetime.datetime.now(tz_hkt).strftime("%Y-%m-%d")
+
+def increment_github_counter(counter_type):
+    """
+    counter_type: "main" (主攻) 或 "backup" (後備)
+    """
+    path = "usage_counter.json"
+    url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/{path}"
+    headers = {
+        "Authorization": f"token {GIT_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    today_str = get_hkt_date_str()
+    default_counter = {
+        "last_reset_date": today_str,
+        "exam_tool": {"main": 0, "backup": 0},
+        "dictation_tool": {"main": 0, "backup": 0}
+    }
+    
+    for attempt in range(3):
+        try:
+            res = requests.get(url, headers=headers)
+            if res.status_code == 200:
+                data = res.json()
+                content = base64.b64decode(data["content"]).decode("utf-8")
+                counter = json.loads(content)
+                sha = data["sha"]
+            else:
+                counter = default_counter
+                sha = None
+                
+            if counter.get("last_reset_date") != today_str:
+                counter["last_reset_date"] = today_str
+                counter["exam_tool"] = {"main": 0, "backup": 0}
+                counter["dictation_tool"] = {"main": 0, "backup": 0}
+                
+            # 🌟 精準加算至默書工具專屬欄位
+            counter["dictation_tool"][counter_type] += 1
+            
+            content_str = json.dumps(counter, indent=2)
+            content_b64 = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
+            payload = {
+                "message": f"Increment dictation {counter_type} counter [skip ci]",
+                "content": content_b64
+            }
+            if sha:
+                payload["sha"] = sha
+                
+            put_res = requests.put(url, headers=headers, json=payload)
+            if put_res.status_code in [200, 201]:
+                st.toast(f"📊 默書雲端配額同步成功！今日已用「{counter_type}」：{counter['dictation_tool'][counter_type]} 次", icon="📝")
+                break
+            time.sleep(0.5)
+        except:
+            time.sleep(0.5)
+
 # ==========================================================
 # 🧠 雙語核心功能函數
 # ==========================================================
@@ -66,7 +129,6 @@ def scan_lesson_cached_audios(title):
     headers = {"Authorization": f"token {GIT_TOKEN}"}
     res = requests.get(url, headers=headers)
     
-    # 🌟 建立速度對照鏡，將舊代碼背後的數字實時翻譯成中文 UI 詞彙
     text_mapping = {
         "0": "快",
         "-20": "正常",
@@ -82,11 +144,9 @@ def scan_lesson_cached_audios(title):
                 speed_match = re.search(r'_speed_rate_(-?\d+)', name)
                 if speed_match:
                     pure_num = speed_match.group(1)
-                    # 🌟 翻譯！如果找不到匹配則顯示原來的百分比
                     display_text = text_mapping.get(pure_num, f"{pure_num}%")
                     found_tracks.append((display_text, name, pure_num))
     try:
-        # 按照速度大小排序（轉成整數由大到小排序）
         found_tracks.sort(key=lambda x: int(x[2]), reverse=True)
     except:
         found_tracks.sort()
@@ -138,38 +198,45 @@ def convert_image_to_base64(uploaded_file):
     image.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
+# 🆕 升級為 Google 三路純免費高可用 OCR 鏈條
 def gemini_vision_extract_bilingual(base64_images_list, mode="中文"):
     if not base64_images_list: return ""
     if not GEMINI_TOKEN: return "錯誤：未在 Secrets 中設定 GEMINI_TOKEN！"
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
-        headers = {"Content-Type": "application/json"}
-        
-        if mode == "中文":
-            prompt_text = """你現在是一個100%精準、只會看圖抄寫的繁體中文打字掃描儀。
-            圖片是小學課本，漢字正上方疊加了密密麻麻的普通話拼音。
-            【🚫 鋼鐵死命令】：
-            1. 完全無視所有拼音字母、英文字元和小圓圈數字標號。
-            2. 盯緊【大字漢字】，一字不漏、按照自然段落順序將漢字抄寫下來，保持全形標點符號與原本換行。直接輸出純文字。"""
-        else:
-            prompt_text = """You are now a 100% accurate, literal English text scanner for school textbooks.
-            【🚫 Strict Commands】:
-            1. Transcribe the English prose text from the image word for word with absolute accuracy.
-            2. Maintain all original capitalization, words, paragraphs, and punctuation (commas, periods, question marks).
-            3. Ignore background illustrations, page numbers, and footnote definitions at the bottom. 
-            4. Output ONLY clean English text. Do not include any explanations or markdown tags."""
+    
+    if mode == "中文":
+        prompt_text = """你現在是一個100%精準、只會看圖抄寫的繁體中文打字掃描儀。
+        圖片是小學課本，漢字正上方疊加了密密麻麻的普通話拼音。
+        【🚫 鋼鐵死命令】：
+        1. 完全無視所有拼音字母、英文字元和小圓圈數字標號。
+        2. 盯緊【大字漢字】，一字不漏、按照自然段落順序將漢字抄寫下來，保持全形標點符號與原本換行。直接輸出純文字。"""
+    else:
+        prompt_text = """You are now a 100% accurate, literal English text scanner for school textbooks.
+        【🚫 Strict Commands】:
+        1. Transcribe the English prose text from the image word for word with absolute accuracy.
+        2. Maintain all original capitalization, words, paragraphs, and punctuation (commas, periods, question marks).
+        3. Ignore background illustrations, page numbers, and footnote definitions at the bottom. 
+        4. Output ONLY clean English text. Do not include any explanations or markdown tags."""
 
-        parts = [{"text": prompt_text}]
-        for b64 in base64_images_list:
-            parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
+    parts = [{"text": prompt_text}]
+    for b64 in base64_images_list:
+        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
+    payload = {"contents": [{"parts": parts}]}
+    
+    free_models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash"]
+    
+    for model_id in free_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_TOKEN}"
+        try:
+            res = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=50)
+            if res.status_code == 200:
+                # 🌟 識別成功：同步雲端計數器
+                c_type = "main" if model_id == "gemini-2.5-flash" else "backup"
+                increment_github_counter(c_type)
+                return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except:
+            continue
             
-        payload = {"contents": [{"parts": parts}]}
-        res = requests.post(url, headers=headers, json=payload)
-        if res.status_code == 200:
-            return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-        return f"Gemini API 報錯: {res.text}"
-    except Exception as e:
-        return f"Gemini 辨識發生異常: {str(e)}"
+    return "❌ 所有 Google 免費通道今日辨識配額已用盡，請手動複製或明天再試。"
 
 def convert_punctuation_to_words_bilingual(text, mode="中文"):
     if mode == "中文":
@@ -226,7 +293,7 @@ async def generate_audio_clean_raw_bilingual(speak_text, custom_rate="-20%", mod
             if chunk["type"] == "audio": audio_data += chunk["data"]
         return audio_data
     except Exception as e:
-        print(f"TTS 發音生成報錯: {str(e)}") 
+        print(f"TTS 發音生成報慢: {str(e)}") 
         return b""
 
 def generate_true_mp3_silence(seconds):
@@ -262,7 +329,7 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
                 current_chunk = ""
                 current_char_count = 0
         if current_chunk.strip():
-            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」")
+            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "結構】")
             chunk_restore = chunk_restore.replace("【開書名】", "《").replace("【關書名】", "》")
             chunk_restore = chunk_restore.replace("【破折】", "——")
             sub_sentences.append(chunk_restore)
@@ -299,7 +366,7 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
             clean_chunk = current_chunk.strip()
             if clean_chunk:
                 last_char = clean_chunk[-1]
-                if last_char in ['"', '装', '’', "'"] and len(clean_chunk) > 1:
+                if last_char in ['"', '裝', '’', "'"] and len(clean_chunk) > 1:
                     last_char = clean_chunk[-2]
                 
                 if last_char in ['.', '!', '?', ';'] or (last_char == ',' and len(current_chunk.split()) >= 5):
@@ -325,7 +392,7 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
 # 🎨 UI & 安全防護鎖
 # ==========================================================
 st.set_page_config(layout="wide")
-st.title("📖 智能中英雙語默書聽寫機 v1.11.1")
+st.title("📖 智能中英雙語默書聽寫機 v1.11.2")
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -512,7 +579,6 @@ with tab3:
             if cached_tracks:
                 st.success(f"✨ 成功在雲端搵到 {len(cached_tracks)} 個不同語速的版本！想播邊個直接撳 Play：")
                 for speed_text, filename in cached_tracks:
-                    # 🌟 完美改版：【語速 -30%】全面改成地道中文化語速口語【語速：慢】！
                     with st.expander(f"▶️ 點擊展開點播：【語速：{speed_text}】完整聽寫連續軌", expanded=True):
                         raw_stream_url = generate_raw_github_url(filename)
                         st.audio(raw_stream_url, format="audio/mp3")
