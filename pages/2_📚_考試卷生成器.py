@@ -13,8 +13,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 跨世代升級 v1.4.0：無縫多模型備用鏈 (Flash -> Pro -> v3) 徹底粉碎 429 額度超限
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.4.0"
+# 🆕 安全加固升級 v1.4.1：加入字面 \n 萬能清洗過濾器，徹底消滅排版換行崩潰 Bug
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.4.1"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -67,20 +67,13 @@ def read_from_exam_vault():
 # 🛡️ 智慧多模型備用輪替鏈與自動重試引擎（Failover Chain）
 # ==========================================
 def call_gemini_with_fallback(payload_template, gemini_token):
-    """
-    順序調用不同的 Gemini 模型以避開免費層 429 限制
-    鏈條：2.5-flash -> 2.5-pro -> 3.5-flash -> 3-flash
-    """
     models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.5-flash", "gemini-3-flash"]
     last_res = None
     
     for model_id in models:
         api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={gemini_token}"
-        
-        # 深拷貝 Payload 模板
         payload = json.loads(json.dumps(payload_template))
         
-        # 每個模型先進行兩次快速重試（應對短暫網絡波動）
         for delay in [1, 2]:
             try:
                 res = requests.post(api_url, headers={"Content-Type": "application/json"}, json=payload, timeout=90)
@@ -93,12 +86,11 @@ def call_gemini_with_fallback(payload_template, gemini_token):
                     time.sleep(delay)
                     continue
                 else:
-                    break  # 400 等非配額錯誤直接跳出，準備切換下一個模型
+                    break
             except Exception as e:
                 time.sleep(delay)
                 continue
                 
-        # 當前模型超限或失敗，自動嘗試下一代模型
         st.toast(f"⚠️ 模型 {model_id} 配額耗盡，正自動切換至備用通道...", icon="🔄")
         
     return last_res, None
@@ -163,6 +155,10 @@ def convert_to_vertical_fractions(text_content):
     return text_content
 
 def python_layout_engine(raw_text, is_answer_key=False):
+    # 🌟 核心修復一：萬能清洗器，將字面字串 "\\n" 同 "\\\\n" 徹底還原成系統真正嘅斷行符 "\n"
+    if raw_text:
+        raw_text = raw_text.replace("\\n", "\n").replace("\\\\n", "\n")
+        
     raw_text = re.sub(r'\s*([○●]\s*[A-D]\.)', r'\n\1', raw_text)
     raw_text = convert_to_vertical_fractions(raw_text)
     lines = raw_text.split('\n')
@@ -271,7 +267,7 @@ if btn_call_ai:
     if mc_count == 0 and fill_count == 0 and calc_count == 0 and text_count == 0:
         st.error("❌ 請至少將一項題型的滑桿調大於 0！")
     else:
-        with st.spinner("🚀 正在啟用高可用性模型鏈，多通道並行出題中..."):
+        with st.spinner("🚀 正在開啟 Gemini 智慧分流大腦，全力出題中..."):
             contents = []
             final_vault_text = read_from_exam_vault()
             mc_instruction = f"必須剛好生成【{mc_count}】題。" if mc_count > 0 else "不要出 any 多項選擇題，甲部留空。"
@@ -299,7 +295,6 @@ if btn_call_ai:
                     mime_type = "application/pdf" if f.name.endswith(".pdf") else "image/jpeg"
                     contents.append({"mime_type": mime_type, "data": f.getvalue()})
             
-            # 定義通用的 JSON Schema Payload Template
             payload_template = {
                 "contents": [],
                 "generationConfig": {
@@ -327,17 +322,21 @@ if btn_call_ai:
                 else: 
                     payload_template["contents"].append({"parts": [{"inline_data": {"mime_type": item["mime_type"], "data": base64.b64encode(item["data"]).decode("utf-8")}}]})
             
-            # 🌟 調用多模型智慧降級備用鏈 (Flash -> Pro -> Flash 3.5 -> Flash 3)
             res, used_model = call_gemini_with_fallback(payload_template, GEMINI_TOKEN)
             
             try:
                 if res and res.status_code == 200:
                     raw_ai_output = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
                     parsed_json = json.loads(raw_ai_output)
-                    st.session_state['generated_exam'] = parsed_json.get("exam_body", "")
-                    st.session_state['generated_answers'] = parsed_json.get("answer_body", "")
-                    st.session_state['exam_text_editor'] = parsed_json.get("exam_body", "")
-                    st.session_state['ans_text_editor'] = parsed_json.get("answer_body", "")
+                    
+                    # 🌟 核心修復二：接收端同時進行 "\\n" 自動清洗，雙重鎖死
+                    ex_body = parsed_json.get("exam_body", "").replace("\\n", "\n").replace("\\\\n", "\n")
+                    ans_body = parsed_json.get("answer_body", "").replace("\\n", "\n").replace("\\\\n", "\n")
+                    
+                    st.session_state['generated_exam'] = ex_body
+                    st.session_state['generated_answers'] = ans_body
+                    st.session_state['exam_text_editor'] = ex_body
+                    st.session_state['ans_text_editor'] = ans_body
                     st.success(f"🎉 題目與答案分流成功！(成功調用模型: {used_model})")
                     st.rerun()
                 else:
