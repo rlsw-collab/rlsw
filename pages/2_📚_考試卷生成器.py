@@ -14,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 全新升級 v1.2.3：徹底校正題目與答案前後順序、答題虛線歸位
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.2.3"
+# 🆕 全新里程碑升級 v1.3.2：雙TextBox獨立區塊 + 徹底校正答題線與副題目 + 防格式損毀
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.3.2"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -65,7 +65,7 @@ def read_from_exam_vault():
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================
-# 2. 輔助函式：GitHub 與圖片/OCR 處理
+# 2. 輔助函式：GitHub 與圖片處理
 # ==========================================
 def upload_to_github(path, content, is_bytes=False):
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
@@ -87,13 +87,16 @@ def convert_image_to_base64(file_val):
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
 def do_gemini_ocr(b64_list):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
+    api_host = "https://generativelanguage.googleapis.com"
+    api_route = "/v1beta/models/gemini-2.5-flash:generateContent"
+    api_url = f"{api_host}{api_route}?key={GEMINI_TOKEN}"
+    
     prompt = "你是一個100%精準的繁體中文與英文打字掃描儀。請一字不漏、按照段落順序將圖片中的所有教學課文 and 題目文字抄寫下來。直接輸出純文字，不要加入任何解釋。"
     parts = [{"text": prompt}]
     for b64 in b64_list:
         parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
     try:
-        res = requests.post(url, headers={"Content-Type": "application/json"}, json={"contents": [{"parts": parts}]})
+        res = requests.post(api_url, headers={"Content-Type": "application/json"}, json={"contents": [{"parts": parts}]})
         if res.status_code == 200:
             return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
     except:
@@ -101,10 +104,10 @@ def do_gemini_ocr(b64_list):
     return "❌ 圖片辨識失敗，請重試或手動輸入。"
 
 # ==========================================
-# 🚀 🚀 Python 終極分數與視覺排版引擎 🚀 🚀
+# 🚀 🚀 Python 終極分數與視覺排版引擎 (雙區獨立渲染) 🚀 🚀
 # ==========================================
 def convert_to_vertical_fractions(text_content):
-    # 預清洗 AI 連體字 Bug
+    # 暴力預清洗 AI 連體字 Bug
     text_content = text_content.replace("312", " 3 1/2 ")
     text_content = text_content.replace("213", " 2 1/3 ")
     text_content = text_content.replace("214", " 2 1/4 ")
@@ -120,104 +123,73 @@ def convert_to_vertical_fractions(text_content):
     text_content = re.sub(r'(?<!\d)38(?!\d|\.)', '3/8', text_content)
     text_content = re.sub(r'(?<!\d)12(?!\d|\.)', '1/2', text_content)
 
-    # 渲染帶分數
+    # 渲染帶分數（支援帶括號的分數，如 3(2/5)）
     text_content = re.sub(r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
     # 渲染普通分數
     text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)(\d+)/(\d+)(?!\d)(?!>)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
     return text_content
 
 def python_layout_engine(raw_text, is_answer_key=False):
+    # 選擇題行內選項自動斷行清洗 (○ A. ○ B. 格式強制斷行)
+    raw_text = re.sub(r'\s*([○●]\s*[A-D]\.)', r'\n\1', raw_text)
+    
     raw_text = convert_to_vertical_fractions(raw_text)
     lines = raw_text.split('\n')
     processed_lines = []
     
+    # 引入「當前章節追蹤器」，精準限制只在丙部/丁部加虛線
+    current_section = ""
+    
     for line in lines:
         if not line.strip(): continue
         
-        # 清除多餘 Markdown 符號
         clean_line = line.replace("**", "").replace("###", "").strip()
         
-        # 🚀 副題目（甲乙丙丁部）大字體、加粗
-        if re.search(r'^[甲乙丙丁]部：', clean_line) or "部：" in clean_line:
-            processed_lines.append(f'<div class="exam-section-header">{clean_line}</div>')
-            continue
-
-        # 識別考卷頂部大標題
-        if "數學科測驗" in clean_line or "數學科考試" in clean_line or ("考試" in clean_line and "部" not in clean_line and "題" not in clean_line and len(clean_line) < 30):
+        # 1. 識別考卷大標題（置中加大）
+        if "數學科測驗" in clean_line or "數學科考試" in clean_line or ("考試" in clean_line and "部" not in clean_line and "題" not in clean_line and len(clean_line) < 35):
             processed_lines.append(f'<div class="exam-title-main">{clean_line}</div>')
             continue
             
-        # 識別班級姓名個人資料欄
+        # 2. 識別個人資料欄
         if "班級" in clean_line or "姓名" in clean_line or "班別" in clean_line:
             processed_lines.append(f'<div class="exam-user-info">{clean_line}</div>')
             continue
 
-        # 選擇題選項強制獨立換行
+        # 3. 🚀 識別副題目（甲乙丙丁部），強制套用超大 BOLD 樣式
+        if re.search(r'^[甲乙丙丁]部：', clean_line) or "部：" in clean_line:
+            current_section = clean_line # 更新當前解析到的章節
+            processed_lines.append(f'<div class="exam-section-header">{clean_line}</div>')
+            continue
+
+        # 4. 選擇題選項強制獨立換行（🛑 拿走任何多餘答題線，純乾淨選項）
         if re.search(r'[○●]\s*[A-D]\.', line):
             if "●" in line: line = line.replace("●", '<span class="mc-ans">●</span>')
             processed_lines.append(f'<div class="mc-option">{line}</div>')
             continue
             
-        # 計算題或應用題
-        if re.match(r'^\d+\.', clean_line) and ("丙部" in raw_text or "丁部" in raw_text or "應用題" in clean_line or "計算" in clean_line):
-            processed_lines.append(f'<div class="question-text">{line}</div>')
-            # 🔴 完美撥亂反正常青樹：只有在「非答案頁」（即題目卷答題紙）才鋪設 4 條虛線！
-            if not is_answer_key:
-                processed_lines.append('<div class="write-zone">' + '<div class="row-line"></div>'*4 + '</div>')
-            continue
-
-        # 填充題
-        if "填空" in clean_line or "填充" in clean_line or (re.match(r'^\d+\.', clean_line) and ("部" not in clean_line) and ("題" not in clean_line)):
-            if not is_answer_key and not re.search(r'[○●]\s*[A-D]\.', line):
-                line += ' <span class="short-line">______</span>'
+        # 5. 🛑 填充題（拿走多餘答題線，純粹保留原汁原味）
+        if "填空" in clean_line or "填充" in clean_line:
             processed_lines.append(f'<div class="fill-blank-row">{line}</div>')
             continue
+
+        # 6. 計算題或應用題（🛑 精密鎖定：只有在題目卷、且當前章節為丙部/丁部、且非答案卷時，才鋪設 4 條虛線！）
+        is_applied_or_calc_section = any(s in current_section for s in ["丙部", "丁部", "計算", "應用題", "文字題"])
+        if re.match(r'^\d+\.', clean_line) and not is_answer_key and is_applied_or_calc_section:
+            processed_lines.append(f'<div class="question-text">{line}</div>')
+            processed_lines.append('<div class="write-zone">' + '<div class="row-line"></div>'*4 + '</div>')
+            continue
             
+        # 其他普通文字行
         processed_lines.append(f'<div>{line}</div>')
         
     return "\n".join(processed_lines)
 
-def process_full_exam(raw_gemini_output):
-    """🆕 智慧型對調解析器：保證永遠先出現『題目卷』，後出現『答案頁』"""
-    
-    # 1. 預先清除 AI 吐在最前方的引導廢話
-    if "好的，各位小五的同學" in raw_gemini_output:
-        match = re.search(r'香港小學.*數學科測驗', raw_gemini_output)
-        if match:
-            raw_gemini_output = raw_gemini_output[match.start():]
-
-    # 2. 自動識別並安全拆分分割線
-    for keyword in ["🔑 答案頁", "Answer Key", "🔑答案", "【答案】", "數學科測驗 - 答案", "數學科測驗 – 答案"]:
-        if keyword in raw_gemini_output and "---" not in raw_gemini_output:
-            raw_gemini_output = raw_gemini_output.replace(keyword, f"---\n{keyword}")
-            break
-
-    # 3. 完美對調核心判定
-    if "---" in raw_gemini_output:
-        parts = raw_gemini_output.split("---")
-        
-        # 🔴 重新校正：如果發現 parts[0] 裡面含有解答字眼，說明 AI 把答案排在前面了
-        if any(k in parts[0] for k in ["🔑 答案頁", "Answer Key", "答：", "- 答案"]):
-            exam_part = parts[1]  # 後半段是真·題目
-            ans_part = parts[0]   # 前半段是真·答案
-        else:
-            exam_part = parts[0]  # 前半段是真·題目
-            ans_part = parts[1]   # 後半段是真·答案
-            
-        # 🚀 絕對順序輸出：先純題目卷（帶4條答題虛線），後分頁答案卷（純文字解答）
-        html_exam = python_layout_engine(exam_part, is_answer_key=False)
-        html_ans = python_layout_engine(ans_part, is_answer_key=True)
-        return html_exam + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁 (Answer Key)</h2>' + html_ans
-    else:
-        # 終極保底機制
-        html_exam = python_layout_engine(raw_gemini_output, is_answer_key=False)
-        html_ans = python_layout_engine(raw_gemini_output, is_answer_key=True)
-        return html_exam + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁 (Answer Key)</h2>' + html_ans
-
 # ==========================================
 # 3. Streamlit 網頁單欄直落式佈局
 # ==========================================
+# 初始化雙獨立暫存狀態機，完美分流
 if 'generated_exam' not in st.session_state: st.session_state['generated_exam'] = ""
+if 'generated_answers' not in st.session_state: st.session_state['generated_answers'] = ""
 
 current_vault_ocr = read_from_exam_vault()
 vault_hash = str(len(current_vault_ocr)) + "_" + str(hash(current_vault_ocr))
@@ -282,10 +254,11 @@ if btn_call_ai:
     if mc_count == 0 and fill_count == 0 and calc_count == 0 and text_count == 0:
         st.error("❌ 請至少將一項題型的滑桿調大於 0！")
     else:
-        with st.spinner("🚀 正在開啟 Gemini 雙向大腦，全面透視內容出題中..."):
+        with st.spinner("🚀 正在開啟 Gemini 智慧分流大腦，全力出題中..."):
             contents = []
             final_vault_text = read_from_exam_vault()
             
+            # 使用原生 JSON Schema，100% 免疫平台 Markdown 損毀 Bug
             prompt_text = f"""你是一位熟知香港小學課程、傳統名校考卷風格的資深老師。請為【香港小學{grade}】的學生，製作一份【{subject}】科測驗/考試卷。
             
             🎯【題型與數量滑桿硬命令】：
@@ -295,23 +268,24 @@ if btn_call_ai:
             - 列式計算題：【{calc_count}】題
             - 長題目文字題：【{text_count}】題
             
-            請確保輸出的內容同時包含「試卷正文」與「答案頁」，並在兩者中間加上唯一的 `---` 分割線！
+            【🚫 格式輸出最高命令 - 請嚴格回傳標準 JSON 結構】：
+            請輸出一個標準的 JSON 物件，結構如下：
+            {{
+              "exam_body": "這裡填寫整份試卷的題目正文（包含試卷大標題、班級姓名欄位、甲乙丙丁部副題目、以及所有題目文字。選擇題選項使用 ○ A. 格式開頭。分數一律採用純文字 3/5 或 2 1/4）",
+              "answer_body": "這裡填寫完整的答案頁內容（包含答案大標題、甲乙丙丁部，每道題都要列出詳細計算過程及最終正確答案）"
+            }}
             """
             
             if range_mode == "提供範圍":
-                prompt_text += f"\n🎯【出題內容命令】：請完全根據用家在 TextBox 提供並修改好的以下繁體教材文字內容進行出題：\n「{final_vault_text}」\n"
+                prompt_text += f"\n🎯【出題內容命令】：請完全根據以下文本內容出題：\n「{final_vault_text}」\n"
             else:
-                prompt_text += f"\n🎯【出題內容命令】：用家這次選擇了『提供作業/工作紙』模式。請你【一定要用視覺功能看懂】下方附帶的上傳圖片，全盤理解這些工作紙/作業裡面的題目核心概念、知識考點和題型難度，並根據圖片入面的實質內容出一套相似且全新嘅題目！\n"
+                prompt_text += f"\n🎯【出題內容命令】：請精準看懂下方上傳圖片的工作紙內容、考點和難度，並出一套相似且全新的題目！\n"
             
             prompt_text += """
             分數格式請使用純文字的分式表示：分子/分母 (例如: 3/5 或 1/4) 或 帶分數 (例如: 2 1/3 或 3 1/2)，中間可以有空格，乘號用 x，除號用 ÷。
             選擇題格式：
-            1. 問題文字
-            ○ A. 選項一
-            ○ B. 選項二
-            ○ C. 選項三
-            ○ D. 選項外
-            試卷與答案頁中間使用 `---` 分割。"""
+            1. 問題文字 ○ A. 選項一 ○ B. 選項二 ○ C. 選項三 ○ D. 選項四
+            """
             
             contents.append(prompt_text)
             if uploaded_files:
@@ -319,48 +293,101 @@ if btn_call_ai:
                     mime_type = "application/pdf" if f.name.endswith(".pdf") else "image/jpeg"
                     contents.append({"mime_type": mime_type, "data": f.getvalue()})
             
-            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
-            payload_data = []
+            # 透過動態拼接 URL，完美避開平台靜態 Link 解析攔截 Bug
+            api_host = "https://generativelanguage.googleapis.com"
+            api_route = "/v1beta/models/gemini-2.5-flash:generateContent"
+            api_url = f"{api_host}{api_route}?key={GEMINI_TOKEN}"
+            
+            # 使用 Gemini 2.5 原生 Structured Output (JSON) 完美鎖定輸出格式
+            payload = {
+                "contents": [],
+                "generationConfig": {
+                    "responseMimeType": "application/json",
+                    "responseSchema": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "exam_body": {"type": "STRING"},
+                            "answer_body": {"type": "STRING"}
+                        },
+                        "required": ["exam_body", "answer_body"]
+                    }
+                }
+            }
+            
             for item in contents:
-                if isinstance(item, str): payload_data.append({"text": item})
-                else: payload_data.append({"inline_data": {"mime_type": item["mime_type"], "data": base64.b64encode(item["data"]).decode("utf-8")}})
+                if isinstance(item, str):
+                    payload["contents"].append({"parts": [{"text": item}]})
+                else:
+                    payload["contents"].append({
+                        "parts": [
+                            {"text": "如下是工作紙的圖片內容："},
+                            {"inline_data": {"mime_type": item["mime_type"], "data": base64.b64encode(item["data"]).decode("utf-8")}}
+                        ]
+                    })
             
             try:
-                res = requests.post(api_url, headers={"Content-Type": "application/json"}, json={"contents": [{"parts": payload_data}]})
+                res = requests.post(api_url, headers={"Content-Type": "application/json"}, json=payload)
                 if res.status_code == 200:
-                    ai_text_result = res.json()['candidates'][0]['content']['parts'][0]['text']
-                    st.session_state['generated_exam'] = ai_text_result
-                    st.success("🎉 考卷題目已成功對接生成！已送入下方控制台暫存區。")
+                    raw_ai_output = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+                    parsed_json = json.loads(raw_ai_output)
+                    
+                    # ✨ 雙 TextBox 智慧分流落實
+                    st.session_state['generated_exam'] = parsed_json.get("exam_body", "")
+                    st.session_state['generated_answers'] = parsed_json.get("answer_body", "")
+                    
+                    st.success("🎉 題目與答案分流成功！已各自送入下方獨立控制台。")
                     st.rerun()
-                else: st.error(f"❌ API 出題報錯: {res.text}")
-            except Exception as e: st.error(f"❌ 網絡異常: {str(e)}")
+                else:
+                    st.error(f"❌ API 出題報錯: {res.text}")
+            except Exception as e:
+                st.error(f"❌ 分流解析失敗，請重試。原因: {str(e)}")
 
-# 🧱 模組 5：題目原始碼暫存區
+# ==========================================
+# 🧱 模組 5：題目與答案超大雙暫存區控制台（橫向拉滿）
+# ==========================================
 st.write("---")
-st.header("📝 步驟三：題目原始碼暫存區")
-st.caption("💡 提示：你可以直接在這裡隨意修改出題字眼，或貼上之前的舊試卷，重刷網頁字也不會丟失。")
+st.header("📝 步驟三：獨立原始碼控制台 (雙區獨立)")
 
-def on_editor_change():
-    st.session_state['generated_exam'] = st.session_state['exam_text_editor']
+col_edit1, col_edit2 = st.columns(2)
 
-stored_text = st.text_area(
-    "💻 試卷原始文本控制台：", 
-    value=st.session_state['generated_exam'], 
-    height=400, 
-    key="exam_text_editor",
-    on_change=on_editor_change
-)
+with col_edit1:
+    st.subheader("💻 題目原始碼暫存區 (只管題目)")
+    def on_exam_change(): st.session_state['generated_exam'] = st.session_state['exam_text_editor']
+    stored_exam = st.text_area(
+        "可在這裡直接手動修改或貼上題目：",
+        value=st.session_state['generated_exam'],
+        height=450,
+        key="exam_text_editor",
+        on_change=on_exam_change
+    )
+
+with col_edit2:
+    st.subheader("🔑 答案原始碼暫存區 (只管答案)")
+    def on_ans_change(): st.session_state['generated_answers'] = st.session_state['ans_text_editor']
+    stored_ans = st.text_area(
+        "可在這裡直接手動修改或貼上答案、過程：",
+        value=st.session_state['generated_answers'],
+        height=450,
+        key="ans_text_editor",
+        on_change=on_ans_change
+    )
 
 # 🧱 模組 6：純排版測試按鈕與導出區
 st.write("##")
 package_name = st.text_input("📦 請輸入這個考試包裹的名稱 (選填)")
 btn_render = st.button("🎨 步驟四：執行 Python 引擎，更新並渲染視覺排版 🔄", type="primary", use_container_width=True)
 
-# --- 試卷預覽與打印區塊 ---
-if st.session_state['generated_exam']:
+# --- 試卷預覽與專業打印區塊 ---
+if st.session_state['generated_exam'] or st.session_state['generated_answers']:
     st.write("---")
-    st.header("🖨️ 專業印刷級預覽面版")
-    perfect_html_content = process_full_exam(st.session_state['generated_exam'])
+    st.header("🖨️ 專業印刷級預覽面版 (雙區完美對齊)")
+    
+    # 智慧調用各自的渲染引擎
+    perfect_exam_html = python_layout_engine(st.session_state['generated_exam'], is_answer_key=False)
+    perfect_ans_html = python_layout_engine(st.session_state['generated_answers'], is_answer_key=True)
+    
+    # 組合雙區，中間置入印刷強制換頁標籤
+    full_html_content = perfect_exam_html + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁 (Answer Key)</h2>' + perfect_ans_html
     
     html_for_printing = f"""
     <!DOCTYPE html>
@@ -384,7 +411,7 @@ if st.session_state['generated_exam']:
             letter-spacing: 2px;
         }}
         
-        /* 個人資料欄位美化加大 */
+        /* 個人資料欄位 */
         .exam-user-info {{
             font-size: 18px !important;
             font-weight: bold !important;
@@ -433,6 +460,7 @@ if st.session_state['generated_exam']:
         .question-text {{ font-weight: bold; margin-top: 25px; margin-bottom: 12px; }}
         .fill-blank-row {{ margin-top: 14px; margin-bottom: 14px; }}
         
+        /* 印刷答題虛線（精準綁定題目頁） */
         .write-zone {{ margin-top: 12px; margin-bottom: 25px; width: 100%; }}
         .row-line {{ width: 100%; height: 38px; border-bottom: 1px dashed #999; }}
         
@@ -445,7 +473,7 @@ if st.session_state['generated_exam']:
         <div class="print-control-bar">
             <button class="print-btn" onclick="window.print()">🖨️ 立即打印 / 匯出 PDF 考卷</button>
         </div>
-        <div id="exam-body">{perfect_html_content}</div>
+        <div id="exam-body">{full_html_content}</div>
     </body>
     </html>
     """
