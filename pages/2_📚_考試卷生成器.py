@@ -13,7 +13,7 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 UI 按鈕風格與佈局統一升級 v1.3.5
+# 🆕 UI 按鈕風格與佈局統一升級 v1.3.5 (標準黑色代碼塊回歸版)
 APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.3.5"
 
 if 'authenticated' not in st.session_state:
@@ -259,8 +259,14 @@ if btn_call_ai:
                     "responseSchema": {
                         "type": "OBJECT",
                         "properties": {
-                            "exam_body": {"type": "STRING"},
-                            "answer_body": {"type": "STRING"}
+                            "exam_body": {
+                                "type": "STRING",
+                                "description": f"題目正卷。要求：甲部多項選擇題：{mc_instruction}；乙部填充題：{fill_instruction}；丙部列式計算題：{calc_instruction}；丁部長題目應用題：{text_instruction}"
+                            },
+                            "answer_body": {
+                                "type": "STRING",
+                                "description": "答案頁。必須對應上述出好的題目，一題不漏地提供詳細計算步驟和最終正確答案。"
+                            }
                         },
                         "required": ["exam_body", "answer_body"]
                     }
@@ -285,7 +291,7 @@ if btn_call_ai:
             except Exception as e: st.error(f"❌ 解析失敗，請重試。原因: {str(e)}")
 
 # ==========================================
-# 🧱 模組 5：雙暫存區控制台
+# 3. 獨立原始碼控制台 (雙區獨立)
 # ==========================================
 st.write("---")
 st.header("📝 步驟三：獨立原始碼控制台 (雙區獨立)")
@@ -302,17 +308,15 @@ with col_edit2:
     st.text_area("答案微調：", value=st.session_state['ans_text_editor'], height=450, key="ans_text_editor", on_change=on_ans_change)
 
 # ==========================================
-# 🧱 模組 6：🆕 步驟四：視覺排版與控制台 (按鈕風格對齊合併)
+# 4. 視覺排版與控制台 (按鈕風格對齊合併)
 # ==========================================
 st.write("---")
 st.header("🎨 步驟四：視覺排版與打印導出")
 
-# 應您要求：兩個按鈕放在一齊，並且全部調用白色底 (type="secondary")
 col_btn1, col_btn2 = st.columns(2)
 with col_btn1:
     btn_render = st.button("🔄 點擊執行 Python 引擎，更新視覺排版", type="secondary", use_container_width=True)
 with col_btn2:
-    # 巧妙利用特殊元件結合 iframe 呼叫外部列印命令
     trigger_print = st.button("🖨️ 立即列印本試卷 / 匯出 PDF", type="secondary", use_container_width=True)
 
 if st.session_state['generated_exam'] or st.session_state['generated_answers']:
@@ -320,8 +324,6 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
     perfect_exam_html = python_layout_engine(st.session_state['generated_exam'], is_answer_key=False)
     perfect_ans_html = python_layout_engine(st.session_state['generated_answers'], is_answer_key=True)
     full_html_content = perfect_exam_html + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁 (Answer Key)</h2>' + perfect_ans_html
-    
-    # 如果用家按下立即列印，將 JavaScript 的 window.print() 設為自動執行狀態
     auto_print_js = "window.print();" if trigger_print else ""
     
     html_for_printing = f"""
@@ -332,24 +334,19 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
     <style>
         #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; color: #000000; padding: 20px; font-size: 16px; line-height: 2.3; }}
         #exam-body p {{ margin-bottom: 16px; }}
-        
         .exam-title-main {{ font-size: 26px !important; font-weight: 800 !important; text-align: center !important; margin-top: 25px !important; margin-bottom: 15px !important; letter-spacing: 2px; }}
         .exam-user-info {{ font-size: 18px !important; font-weight: bold !important; text-align: center !important; margin-bottom: 35px !important; word-spacing: 15px; }}
         .exam-section-header {{ font-size: 20px !important; font-weight: 800 !important; color: #000000 !important; margin-top: 30px !important; margin-bottom: 12px !important; border-left: 5px solid #000; padding-left: 10px; }}
-        
         .v-frac {{ display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; line-height: 1.0; padding: 0 4px; font-size: 0.85em; position: relative; top: -0.15em; }}
         .v-frac .num {{ border-bottom: 1.5px solid #000000; padding-bottom: 2px; min-width: 14px; font-weight: 600; }}
         .v-frac .den {{ padding-top: 2px; min-width: 14px; font-weight: 600; }}
-        
         .mc-option {{ margin-left: 20px; margin-top: 8px; margin-bottom: 8px; display: block !important; clear: both; }}
         .mc-ans {{ color: #ff4b4b; font-weight: bold; }}
         .short-line {{ font-weight: bold; text-decoration: underline; color: #000; }}
-        
         .question-text {{ font-weight: bold; margin-top: 25px; margin-bottom: 12px; }}
         .fill-blank-row {{ margin-top: 14px; margin-bottom: 14px; }}
         .write-zone {{ margin-top: 12px; margin-bottom: 25px; width: 100%; }}
         .row-line {{ width: 100%; height: 38px; border-bottom: 1px dashed #999; }}
-        
         .page-break {{ page-break-before: always; }}
         .ans-header {{ color: #ff4b4b; border-bottom: 2px solid #ff4b4b; padding-bottom: 10px; margin-top: 35px; font-size: 24px; text-align: center; }}
         @media print {{ body {{ background-color: white; }} }}
