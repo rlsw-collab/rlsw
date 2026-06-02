@@ -13,8 +13,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 裝配高階 5 次自動重試退避機制，版本升級至 v1.3.6
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.3.6"
+# 🆕 跨世代升級 v1.4.0：無縫多模型備用鏈 (Flash -> Pro -> v3) 徹底粉碎 429 額度超限
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.4.0"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -64,31 +64,44 @@ def read_from_exam_vault():
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================
-# 🛡️ 新增：Gemini 智慧退避重試引擎（5 次保底）
+# 🛡️ 智慧多模型備用輪替鏈與自動重試引擎（Failover Chain）
 # ==========================================
-def call_gemini_with_backoff(api_url, headers, payload):
+def call_gemini_with_fallback(payload_template, gemini_token):
     """
-    呼叫 Gemini API 並執行標準的指數退避重試（最多 5 次重試：1s, 2s, 4s, 8s, 16s）
+    順序調用不同的 Gemini 模型以避開免費層 429 限制
+    鏈條：2.5-flash -> 2.5-pro -> 3.5-flash -> 3-flash
     """
-    delays = [1, 2, 4, 8, 16]
+    models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.5-flash", "gemini-3-flash"]
     last_res = None
-    for delay in delays:
-        try:
-            res = requests.post(api_url, headers=headers, json=payload, timeout=90)
-            if res.status_code == 200:
-                return res
-            last_res = res
-            # 如果遇到 429 Rate Limit (資源耗盡)，就原地 sleep 隨後重試
-            if res.status_code == 429:
+    
+    for model_id in models:
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={gemini_token}"
+        
+        # 深拷貝 Payload 模板
+        payload = json.loads(json.dumps(payload_template))
+        
+        # 每個模型先進行兩次快速重試（應對短暫網絡波動）
+        for delay in [1, 2]:
+            try:
+                res = requests.post(api_url, headers={"Content-Type": "application/json"}, json=payload, timeout=90)
+                if res.status_code == 200:
+                    st.toast(f"🤖 成功調用模型：{model_id}", icon="✅")
+                    return res, model_id
+                
+                last_res = res
+                if res.status_code == 429:
+                    time.sleep(delay)
+                    continue
+                else:
+                    break  # 400 等非配額錯誤直接跳出，準備切換下一個模型
+            except Exception as e:
                 time.sleep(delay)
                 continue
-            else:
-                # 400 等其他固定格式錯誤不重試，直接跳出
-                break
-        except Exception as e:
-            time.sleep(delay)
-            continue
-    return last_res
+                
+        # 當前模型超限或失敗，自動嘗試下一代模型
+        st.toast(f"⚠️ 模型 {model_id} 配額耗盡，正自動切換至備用通道...", icon="🔄")
+        
+    return last_res, None
 
 # ==========================================
 # 2. 輔助函式：GitHub 與圖片處理
@@ -100,23 +113,30 @@ def convert_image_to_base64(file_val):
     image.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-def do_gemini_ocr(b64_list):
-    api_host = "https://generativelanguage.googleapis.com"
-    api_route = "/v1beta/models/gemini-2.5-flash:generateContent"
-    api_url = f"{api_host}{api_route}?key={GEMINI_TOKEN}"
-    
+def do_gemini_ocr_with_fallback(b64_list, gemini_token):
     prompt = "你是一個100%精準的繁體中文與英文打字掃描儀。請一字不漏、按照段落順序將圖片中的所有教學課文 and 題目文字抄寫下來。直接輸出純文字，不要加入任何解釋。"
     parts = [{"text": prompt}]
     for b64 in b64_list:
         parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
         
     payload = {"contents": [{"parts": parts}]}
-    headers = {"Content-Type": "application/json"}
+    models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.5-flash", "gemini-3-flash"]
     
-    res = call_gemini_with_backoff(api_url, headers, payload)
-    if res and res.status_code == 200:
-        return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-    return "❌ 圖片辨識失敗，可能是超出 API 頻率限制，請稍候重試或手動輸入。"
+    for model_id in models:
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={gemini_token}"
+        for delay in [1, 2]:
+            try:
+                res = requests.post(api_url, headers={"Content-Type": "application/json"}, json=payload, timeout=90)
+                if res.status_code == 200:
+                    st.toast(f"📸 OCR 成功調用模型：{model_id}", icon="✅")
+                    return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+                if res.status_code == 429:
+                    time.sleep(delay)
+                    continue
+            except:
+                time.sleep(delay)
+                continue
+    return "❌ 圖片辨識失敗，所有備用模型均超出 API 頻率限制，請稍候重試或手動輸入。"
 
 # ==========================================
 # 🚀 🚀 Python 終極分數與視覺排版引擎 🚀 🚀
@@ -230,7 +250,7 @@ if range_mode == "提供範圍":
     if uploaded_files and st.button("🔍 點擊執行 Gemini 圖片字元識別 (OCR)", use_container_width=True):
         with st.spinner("正在將圖片文字提取並寫入實體保險箱..."):
             b64_list = [convert_image_to_base64(f.getvalue()) for f in uploaded_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
-            extracted_txt = do_gemini_ocr(b64_list)
+            extracted_txt = do_gemini_ocr_with_fallback(b64_list, GEMINI_TOKEN)
             write_to_exam_vault(extracted_txt)
             st.success("✅ 文字解鎖成功！")
             st.rerun()
@@ -251,7 +271,7 @@ if btn_call_ai:
     if mc_count == 0 and fill_count == 0 and calc_count == 0 and text_count == 0:
         st.error("❌ 請至少將一項題型的滑桿調大於 0！")
     else:
-        with st.spinner("🚀 正在開啟 Gemini 智慧分流大腦，全力出題中..."):
+        with st.spinner("🚀 正在啟用高可用性模型鏈，多通道並行出題中..."):
             contents = []
             final_vault_text = read_from_exam_vault()
             mc_instruction = f"必須剛好生成【{mc_count}】題。" if mc_count > 0 else "不要出 any 多項選擇題，甲部留空。"
@@ -279,8 +299,8 @@ if btn_call_ai:
                     mime_type = "application/pdf" if f.name.endswith(".pdf") else "image/jpeg"
                     contents.append({"mime_type": mime_type, "data": f.getvalue()})
             
-            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
-            payload = {
+            # 定義通用的 JSON Schema Payload Template
+            payload_template = {
                 "contents": [],
                 "generationConfig": {
                     "responseMimeType": "application/json",
@@ -300,14 +320,15 @@ if btn_call_ai:
                     }
                 }
             }
+            
             for item in contents:
-                if isinstance(item, str): payload["contents"].append({"parts": [{"text": item}]})
-                else: payload["contents"].append({"parts": [{"inline_data": {"mime_type": item["mime_type"], "data": base64.b64encode(item["data"]).decode("utf-8")}}]})
+                if isinstance(item, str): 
+                    payload_template["contents"].append({"parts": [{"text": item}]})
+                else: 
+                    payload_template["contents"].append({"parts": [{"inline_data": {"mime_type": item["mime_type"], "data": base64.b64encode(item["data"]).decode("utf-8")}}]})
             
-            headers = {"Content-Type": "application/json"}
-            
-            # 調用智慧退避重試引擎
-            res = call_gemini_with_backoff(api_url, headers, payload)
+            # 🌟 調用多模型智慧降級備用鏈 (Flash -> Pro -> Flash 3.5 -> Flash 3)
+            res, used_model = call_gemini_with_fallback(payload_template, GEMINI_TOKEN)
             
             try:
                 if res and res.status_code == 200:
@@ -317,14 +338,11 @@ if btn_call_ai:
                     st.session_state['generated_answers'] = parsed_json.get("answer_body", "")
                     st.session_state['exam_text_editor'] = parsed_json.get("exam_body", "")
                     st.session_state['ans_text_editor'] = parsed_json.get("answer_body", "")
-                    st.success("🎉 題目與答案分流成功！")
+                    st.success(f"🎉 題目與答案分流成功！(成功調用模型: {used_model})")
                     st.rerun()
-                elif res and res.status_code == 429:
-                    st.error("⚠️ 【免費額度已耗盡】您今日已達到 Google Gemini 20次 的免費調用上限。請等待 1-2 分鐘再點擊「呼叫 Gemini AI」重試，或者更換 API Key。")
                 else:
-                    err_detail = res.text if res else "網絡超時，連線失敗"
-                    st.error(f"❌ API 出題報錯: {err_detail}")
-            except Exception as e:
+                    st.error("❌ 所有調用通道均已超出 API 頻率限制，請稍等 10-15 秒後再點擊生成。")
+            except Exception as e: 
                 st.error(f"❌ 解析失敗，請重試。原因: {str(e)}")
 
 # ==========================================
