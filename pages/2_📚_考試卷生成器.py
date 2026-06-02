@@ -1,4 +1,4 @@
-import streamlit as st
+import streamlit st
 import requests
 import json
 import base64
@@ -14,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級至 v1.1.5：修復 AI 漏斜線 Bug + 強制雙卷並存
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.1.5"
+# 🆕 升級至 v1.1.6：暴力容錯分數攔截 + 關鍵字強行分卷引擎
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.1.6"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -101,29 +101,28 @@ def do_gemini_ocr(b64_list):
     return "❌ 圖片辨識失敗，請重試或手動輸入。"
 
 # ==========================================
-# 🚀 🚀 Python 終極分數與視覺排版引擎 (防 AI 漏字強化版) 🚀 🚀
+# 🚀 🚀 Python 終極分數與視覺排版引擎 (v1.1.6 終極暴力進化版) 🚀 🚀
 # ==========================================
 def convert_to_vertical_fractions(text_content):
     """
-    全新升級的分數過濾器：
-    1. 先修復 AI 吐出的畸形分數（如 312 -> 3 1/2, 14 -> 1/4）
-    2. 再渲染成真正的直式分數 HTML
+    暴力過濾器：無視數字邊界，直接將所有畸形連體字拆開並渲染
     """
-    # 🔴 核心修復：如果發現常見的數學題中出現了三位數或兩位數的畸形連體字，自動還原斜線
-    # 處理常見的小學分數連體 Bug:
-    text_content = re.sub(r'\b(3)12\b', r'\1 1/2', text_content)
-    text_content = re.sub(r'\b(2)13\b', r'\1 1/3', text_content)
-    text_content = re.sub(r'\b(2)14\b', r'\1 1/4', text_content)
-    text_content = re.sub(r'\b(3)34\b', r'\1 3/4', text_content)
-    text_content = re.sub(r'\b(2)12\b', r'\1 1/2', text_content)
-    text_content = re.sub(r'\b(1)38\b', r'\1 3/8', text_content)
-    text_content = re.sub(r'\b(1)025\b', r'10 2/5', text_content)
-    text_content = re.sub(r'\b(1)310\b', r'\1 3/10', text_content)
-    text_content = re.sub(r'\b(7)12\b', r'\1 1/2', text_content)
-    text_content = re.sub(r'(?<!\d)(14)(?!\d)', r'1/4', text_content)
-    text_content = re.sub(r'(?<!\d)(38)(?!\d)', r'3/8', text_content)
-    text_content = re.sub(r'(?<!\d)(56)(?!\d)', r'5/6', text_content)
-    text_content = re.sub(r'(?<!\d)(12)(?!\d)', r'1/2', text_content)
+    # 🔴 終極暴力修復：即便前後黏住了中文字，一樣強制切片
+    text_content = text_content.replace("312", " 3 1/2 ")
+    text_content = text_content.replace("213", " 2 1/3 ")
+    text_content = text_content.replace("214", " 2 1/4 ")
+    text_content = text_content.replace("334", " 3 3/4 ")
+    text_content = text_content.replace("212", " 2 1/2 ")
+    text_content = text_content.replace("138", " 1 3/8 ")
+    text_content = text_content.replace("1025", " 10 2/5 ")
+    text_content = text_content.replace("1310", " 1 3/10 ")
+    text_content = text_content.replace("712", " 7 1/2 ")
+    text_content = text_content.replace("56", " 5/6 ")
+    
+    # 處理沒帶整數的 14 -> 1/4, 38 -> 3/8 (排除掉像題目編號「14.」或年份)
+    text_content = re.sub(r'(?<!\d)(14)(?!\d|\.)', '1/4', text_content)
+    text_content = re.sub(r'(?<!\d)(38)(?!\d|\.)', '3/8', text_content)
+    text_content = re.sub(r'(?<!\d)(12)(?!\d|\.)', '1/2', text_content)
 
     # 🟢 渲染：處理帶分數 (e.g., "3 1/2")
     text_content = re.sub(r'(\d+)\s+(\d+)/(\d+)', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
@@ -149,9 +148,9 @@ def python_layout_engine(raw_text, is_answer_key=False):
             continue
             
         # 填充題加短底線
-        if "填空" in line or "填充" in line or re.match(r'^\d+\.', line.strip()) and not re.search(r'[A-D]\.', line) and ("部" not in line) and ("題" not in line):
+        if "填空" in line or "填充" in line or (re.match(r'^\d+\.', line.strip()) and not re.search(r'[A-D]\.', line) and ("部" not in line) and ("題" not in line) and ("丙部" not in raw_text) and ("丁部" not in raw_text)):
             line = convert_to_vertical_fractions(line)
-            if not is_answer_key and ("分" in line or "cm" in line or "厘米" in line or "答案" in line or line.strip()[-1] in ["：", ":", "。"]):
+            if not is_answer_key:
                 line += ' <span class="short-line">______</span>'
             processed_lines.append(f'<div>{line}</div>')
             continue
@@ -169,11 +168,17 @@ def python_layout_engine(raw_text, is_answer_key=False):
     return "\n".join(processed_lines)
 
 def process_full_exam(raw_gemini_output):
-    """🔴 確保不論 AI 怎麼吐字，正文和答案卷都一定會出現"""
+    """🔴 智能容錯：如果 AI 漏了寫 '---'，後台自動強制切片分卷"""
+    # 如果 AI 忘記給分割線，但文字裡明明有答案頁
+    if "---" not in raw_gemini_output and ("🔑 答案頁" in raw_gemini_output or "香港小學小五 數學科測驗 - 答案" in raw_gemini_output):
+        # 暴力幫它補上分割線
+        raw_gemini_output = raw_gemini_output.replace("🔑 答案頁", "---\n🔑 答案頁")
+        raw_gemini_output = raw_gemini_output.replace("香港小學小五 數學科測驗 - 答案", "---\n香港小學小五 數學科測驗 - 答案")
+
     if "---" in raw_gemini_output:
         parts = raw_gemini_output.split("---")
-        # 智慧判斷哪一段是答案頁
-        if "答案" in parts[0] or "Key" in parts[0]:
+        # 智慧判斷哪一段是答題卷，哪一段是答案頁
+        if "答案" in parts[0] or "Key" in parts[0] or "答：" in parts[0]:
             exam_part = parts[1]
             ans_part = parts[0]
         else:
@@ -182,7 +187,6 @@ def process_full_exam(raw_gemini_output):
             
         return python_layout_engine(exam_part, is_answer_key=False) + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁 (Answer Key)</h2>' + python_layout_engine(ans_part, is_answer_key=True)
     else:
-        # 如果 AI 忘記加分割線，強制整篇當成正文渲染
         return python_layout_engine(raw_gemini_output, is_answer_key=False)
 
 # ==========================================
@@ -262,7 +266,7 @@ if btn_call_ai:
             🎯【題型與數量滑桿硬命令】：
             你出的題型和數量必須嚴格按照以下數字，不准多也不准少：
             - 多項選擇題：【{mc_count}】題
-            - 填充題：【{fill_count}】題
+            - 填充題：【{fill_count}**題
             - 列式計算題：【{calc_count}】題
             - 長題目文字題：【{text_count}】題
             
@@ -357,7 +361,7 @@ if st.session_state['generated_exam']:
             #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; color: #000000; padding: 30px; font-size: 16px; line-height: 2.2; }}
             #exam-body p {{ margin-bottom: 16px; }}
             
-            /* 🚀 真正完美的直式分數：分子在上面，一橫劃，分母在下面 */
+            /* 🚀 真正完美的直式分數 */
             .v-frac {{
                 display: inline-flex;
                 flex-direction: column;
