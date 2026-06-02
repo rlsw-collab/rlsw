@@ -4,6 +4,7 @@ import json
 import base64
 import markdown
 import time
+import re
 from PIL import Image
 
 # ==========================================
@@ -11,14 +12,13 @@ from PIL import Image
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 定義統一的標題與版本號碼 (升級至 v1.0.7)
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.0.7"
+# 定義統一的標題與版本號碼 (升級至 v1.0.8)
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.0.8"
 
 # 初始化 session_state 來記住登入狀態
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
 
-# 如果還未登入，顯示密碼輸入框
 if not st.session_state['authenticated']:
     st.title(APP_TITLE)
     st.info("🔒 此工具受保護，請輸入密碼以解鎖並使用。")
@@ -90,6 +90,23 @@ def get_file_from_github(path):
         file_data = res.json()
         return base64.b64decode(file_data["content"])
     return None
+
+# 🚀 🚀 核心黑科技：用 Python 自動將傳統的 3/5 或 2 1/4 渲染成漂亮的「真·上下直式分數」
+def convert_to_vertical_fractions(html_content):
+    # 1. 先處理帶分數 格式如: 2 1/4 或 2(1/4) -> 2<span class="frac"><sup>1</sup><sub>4</sub></span>
+    html_content = re.sub(
+        r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?',
+        r'\1<span class="v-frac"><sup>\2</sup><sub>\3</sub></span>',
+        html_content
+    )
+    # 2. 再處理普通分數 格式如: 3/5 -> <span class="v-frac"><sup>3</sup><sub>5</sub></span>
+    # 排除掉網頁標籤入面的斜線 (如 </div> 或 <br/>)
+    html_content = re.sub(
+        r'(?<!/)(?<!<)(?<!\d)(\d+)/(\d+)(?!\d)(?!>)',
+        r'<span class="v-frac"><sup>\1</sup><sub>\2</sub></span>',
+        html_content
+    )
+    return html_content
 
 # ==========================================
 # 3. Streamlit 網頁介面設計
@@ -175,53 +192,52 @@ if st.button("📦 儲存並打包資料到 GitHub"):
             base_path = f"exam_packages/{package_name}"
             config_info = {"subject": subject, "grade": grade, "range_text": range_text}
             upload_to_github(f"{base_path}/config.json", json.dumps(config_info, ensure_ascii=False, indent=4))
-            st.success(f"🎉 打包成功！所有資料已安全儲存。")
+            st.success(f"🎉 打包成功！所有資料已 safe 儲存。")
 
 # ==========================================
-# 4. 核心功能：【排版終極優化】直連 2.5 Flash
+# 4. 核心功能：【智慧自動重試】直連 2.5 Flash
 # ==========================================
 st.subheader("✨ 4. 生成測驗/考試卷")
 if st.button("🚀 開始利用 Gemini AI 製作試卷"):
-    with st.spinner("🚀 正在注入直式分數與選擇題分行魔法，請稍候..."):
+    with st.spinner("🚀 智能排版大腦正在為您構思香港小學風格試卷，請稍候..."):
         
+        # 建立簡化、方便 Python 在前端攔截與轉化直式分數的 Prompt
         prompt_text = f"""你是一位熟知香港小學課程、傳統名校考卷風格與考試制度的資深小學老師。
 請為【香港小學{grade}】的學生，製作一份符合教育局課程指引且難易度適中的【{subject}】科測驗/考試卷。
 
-根據香港小學的真實排版要求，出的題型必須符合以下【精細排版與題型命令】：
+根據香港小學的真實排版要求，出的題型必須符合以下【全新修訂版：答題線與排版命令】：
 
-⚠️【1. 數學專業直式分數命令（全新升級）】：
-- 🚫 絕對禁止使用任何 LaTeX 數學格式，禁止出現任何 `$` 符號、`\\frac` 等程式碼。
-- 💡 為了解決小學試卷分數排版問題（分子在上面，中間一劃，分母在下面），你必須使用網頁標準的 HTML 上標（sup）和下標（sub）語法來輸出分數！
-  * 普通分數格式：`<sup>分子</sup>/<sub>分母</sub>`
-  * 帶分數格式：`整數<sup>分子</sup>/<sub>分母</sub>`
-  * 範例：三分之五請寫成 `<sup>3</sup>/<sub>5</sub>`；二又四分之一請寫成 `2<sup>1</sup>/<sub>4</sub>`。
-  * 乘號請直接用「x」，除號請直接用「÷」。
+⚠️【1. 數學分數與符號格式命令】：
+- 🚫 絕對禁止使用任何 LaTeX 數學格式，禁止出現任何 `$` 符號、`\\frac` 等學術程式碼。
+- 🗣️ 為了方便後台處理，分數請直接用最簡單的純文字格式輸出：
+  * 普通分數格式：分子/分母，例如：3/5、13/3。
+  * 帶分數格式：整數 空格 分子/分母，例如：2 1/4、5 1/4。
+  * 乘號請用「x」，除號請用「÷」。
 
-⚠️【2. 多項選擇題 (MC) - 換行與答案獨立命令】：
+⚠️【2. 填充題與計算題的答題線縮短 2/3 命令】：
+- 【填充題】：空格答題線請統一縮減為 6 個底線 `______`。
+- 【計算題 / 簡答題】：每道計算題下面請空出適當的手寫白位，並在題目的正下方或右側尾端提供一條和填充題一樣長度的短答案線 `______` 供填寫最終答案。
+
+⚠️【3. 多項選擇題 (MC) 命令】：
 - 題目自成一行。
-- A、B、C、D 四個選項必須在問題的下方，且「每一個選項必須獨立佔滿一行」，絕對不允許將多個選項合併在同一行！
-- 每個選項前加上一個空心圓圈 `○`。在每個選項的結尾，請加上 `<br>` 標籤以確保絕對分行。
-  正確格式範例：
-  1. 以下哪個分數與 2<sup>1</sup>/<sub>4</sub> 相等？<br>
-     ○ A. <sup>5</sup>/<sub>4</sub><br>
-     ○ B. <sup>7</sup>/<sub>4</sub><br>
-     ○ C. <sup>9</sup>/<sub>4</sub><br>
-     ○ D. <sup>10</sup>/<sub>4</sub><br>
+- A、B、C、D 四個選項必須在問題的下方，且每一個選項必須獨立換行！
+- 每個選項前加上一個空心圓圈 `○`。在每個選項的結尾，請加上 `<br>` 標籤。
 
-⚠️【3. 題型分流與特別限制】：
-- 🚫【找錯處 (Proofreading)】題型：這是【英文】科的專屬題型！當前科目是【{subject}】。如果目前不是英文科，絕對不要生成任何找錯處題型！只有英文科需要。
-- 📝【填充題】：空格的答案線必須加長一倍，請統一使用 16 個底線 `________________` 作為答案線。
-- 🧮【列式計算應用題 / 長題目】：題目後面不需要出現「列式：」和「答：」等任何提示文字。請直接提供「4 條長長的空底橫線」讓學生有足夠的空間進行自由列式與寫出計算步驟。
-  格式範例：
+⚠️【4. 列式計算應用題 - 換行與答題橫線命令】：
+- 應用題題目文字結束後，必須立刻強制換行。
+- 【第一條答題線】必須直接出現在題目的正下方！
+- 題目下方不需要出現「列式：」和「答：」等文字，請直接提供 4 條長長的空白橫線。
+  格式規範（題目下一行立刻開始）：
   ______________________________________________________<br>
   ______________________________________________________<br>
   ______________________________________________________<br>
   ______________________________________________________<br>
+
+⚠️【5. 題型分流限制】：
+- 🚫【找錯處 (Proofreading)】題型：這是【英文】科的專屬題型！當前科目是【{subject}】。如果目前不是英文科，絕對不要生成任何找錯處題型！
 
 【試卷整體結構要求】：
-試卷必須嚴格分為以下兩個部分，並在中間使用 `---` 分割線分開：
-1. 【試卷正文】：包含虛構校名、學生個人資料欄（姓名、班別、學號）、總分、限時。題目要有明確題號、分值。
-2. 【答案頁 (Answer Key)】：緊接在 `---` 之後。多項選擇題的正確答案，請將對應的圓圈變成實心圓圈 `●` 作為示範（例如：● C. <sup>9</sup>/<sub>4</sub>）。
+試卷必須嚴格分為【試卷正文】與【答案頁 (Answer Key)】，中間使用 `---` 分割線分開。
 """
         if range_text:
             prompt_text += f"\n【使用者特別指定的微調範圍與重點】：\n{range_text}\n"
@@ -263,10 +279,18 @@ if st.session_state['generated_exam']:
     st.success("🎉 試卷與答案生成成功！")
     tab1, tab2 = st.tabs(["📺 網頁預覽與導出儲存", "🖨️ 專業打印預覽"])
     
+    # 進行 Python 的「直式分數過濾轉化」
+    raw_markdown_content = st.session_state['generated_exam']
+    html_raw_content = markdown.markdown(raw_markdown_content)
+    
+    # 🚀 在前端透過 Python Regex 暴力轉化真·直式分數
+    perfect_html_content = convert_to_vertical_fractions(html_raw_content)
+    
     with tab1:
-        st.markdown(st.session_state['generated_exam'], unsafe_allow_html=True)
+        # 在前端完美渲染
+        st.markdown(perfect_html_content, unsafe_allow_html=True)
         st.write("---")
-        if st.button("📝 儲卷文本 (exam.md) 到 GitHub"):
+        if st.button("📝 儲存試卷文本 (exam.md) 到 GitHub"):
             if not package_name:
                 st.error("❌ 請先輸入包裹名稱！")
             else:
@@ -275,7 +299,6 @@ if st.session_state['generated_exam']:
                     st.success(f"✅ 試卷成功儲存至 GitHub！")
                     
     with tab2:
-        html_exam_content = markdown.markdown(st.session_state['generated_exam'])
         html_for_printing = f"""
         <!DOCTYPE html>
         <html>
@@ -284,18 +307,30 @@ if st.session_state['generated_exam']:
         <style>
             .print-control-bar {{ background-color: #f0f2f6; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-family: sans-serif; }}
             .print-btn {{ background-color: #ff4b4b; color: white; border: none; padding: 10px 20px; font-size: 16px; font-weight: bold; border-radius: 5px; cursor: pointer; }}
-            #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", Arial, sans-serif; line-height: 2.0; color: #000000; padding: 10px; font-size: 16px; }}
+            #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", Arial, sans-serif; line-height: 2.2; color: #000000; padding: 10px; font-size: 16px; }}
             
-            #exam-body p {{ margin-bottom: 14px; }}
+            #exam-body p {{ margin-bottom: 16px; }}
             
-            /* CSS 強制換行魔法：只要偵測到選擇題圓圈，自動獨立成行 */
-            #exam-body sup {{ font-size: 0.75em; vertical-align: super; line-height: 0; }}
-            #exam-body sub {{ font-size: 0.75em; vertical-align: sub; line-height: 0; }}
-            
-            @media print {{
-                .print-control-bar {{ display: none; }}
-                body {{ background-color: white; }}
-                hr {{ page-break-after: always; border: none; visibility: hidden; }}
+            /* 🚀 頂級直式分數 CSS：分子在上，一條橫劃線，分母在下 */
+            .v-frac {{
+                display: inline-flex;
+                flex-direction: column;
+                vertical-align: middle;
+                text-align: center;
+                line-height: 1.0;
+                padding: 0 4px;
+                font-size: 0.85em;
+            }}
+            .v-frac sup {{
+                border-bottom: 1.5px solid #000; /* 中間精美的一劃分數線 */
+                padding-bottom: 2px;
+                vertical-align: baseline;
+                position: static;
+            }}
+            .v-frac sub {{
+                padding-top: 2px;
+                vertical-align: baseline;
+                position: static;
             }}
         </style>
         </head>
@@ -303,7 +338,7 @@ if st.session_state['generated_exam']:
             <div class="print-control-bar">
                 <button class="print-btn" onclick="window.print()">🖨️ 立即打印 / 匯出 PDF</button>
             </div>
-            <div id="exam-body">{html_exam_content}</div>
+            <div id="exam-body">{perfect_html_content}</div>
         </body>
         </html>
         """
