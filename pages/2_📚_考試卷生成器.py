@@ -13,7 +13,7 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 UI 按鈕風格與佈局統一升級 v1.3.6 (Canvas 完美修復版)
+# 🆕 裝配高階 5 次自動重試退避機制，版本升級至 v1.3.6
 APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.3.6"
 
 if 'authenticated' not in st.session_state:
@@ -64,6 +64,33 @@ def read_from_exam_vault():
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================
+# 🛡️ 新增：Gemini 智慧退避重試引擎（5 次保底）
+# ==========================================
+def call_gemini_with_backoff(api_url, headers, payload):
+    """
+    呼叫 Gemini API 並執行標準的指數退避重試（最多 5 次重試：1s, 2s, 4s, 8s, 16s）
+    """
+    delays = [1, 2, 4, 8, 16]
+    last_res = None
+    for delay in delays:
+        try:
+            res = requests.post(api_url, headers=headers, json=payload, timeout=90)
+            if res.status_code == 200:
+                return res
+            last_res = res
+            # 如果遇到 429 Rate Limit (資源耗盡)，就原地 sleep 隨後重試
+            if res.status_code == 429:
+                time.sleep(delay)
+                continue
+            else:
+                # 400 等其他固定格式錯誤不重試，直接跳出
+                break
+        except Exception as e:
+            time.sleep(delay)
+            continue
+    return last_res
+
+# ==========================================
 # 2. 輔助函式：GitHub 與圖片處理
 # ==========================================
 def convert_image_to_base64(file_val):
@@ -82,13 +109,14 @@ def do_gemini_ocr(b64_list):
     parts = [{"text": prompt}]
     for b64 in b64_list:
         parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
-    try:
-        res = requests.post(api_url, headers={"Content-Type": "application/json"}, json={"contents": [{"parts": parts}]})
-        if res.status_code == 200:
-            return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except:
-        pass
-    return "❌ 圖片辨識失敗，請重試或手動輸入。"
+        
+    payload = {"contents": [{"parts": parts}]}
+    headers = {"Content-Type": "application/json"}
+    
+    res = call_gemini_with_backoff(api_url, headers, payload)
+    if res and res.status_code == 200:
+        return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+    return "❌ 圖片辨識失敗，可能是超出 API 頻率限制，請稍候重試或手動輸入。"
 
 # ==========================================
 # 🚀 🚀 Python 終極分數與視覺排版引擎 🚀 🚀
@@ -158,12 +186,10 @@ def python_layout_engine(raw_text, is_answer_key=False):
     return "\n".join(processed_lines)
 
 # ==========================================
-# 3. Streamlit 網頁佈局 & 狀態機安全初始化
+# 3. Streamlit 網頁佈局
 # ==========================================
 if 'generated_exam' not in st.session_state: st.session_state['generated_exam'] = ""
 if 'generated_answers' not in st.session_state: st.session_state['generated_answers'] = ""
-if 'exam_text_editor' not in st.session_state: st.session_state['exam_text_editor'] = ""
-if 'ans_text_editor' not in st.session_state: st.session_state['ans_text_editor'] = ""
 
 current_vault_ocr = read_from_exam_vault()
 vault_hash = str(len(current_vault_ocr)) + "_" + str(hash(current_vault_ocr))
@@ -278,9 +304,13 @@ if btn_call_ai:
                 if isinstance(item, str): payload["contents"].append({"parts": [{"text": item}]})
                 else: payload["contents"].append({"parts": [{"inline_data": {"mime_type": item["mime_type"], "data": base64.b64encode(item["data"]).decode("utf-8")}}]})
             
+            headers = {"Content-Type": "application/json"}
+            
+            # 調用智慧退避重試引擎
+            res = call_gemini_with_backoff(api_url, headers, payload)
+            
             try:
-                res = requests.post(api_url, headers={"Content-Type": "application/json"}, json={"contents": payload["contents"], "generationConfig": payload["generationConfig"]})
-                if res.status_code == 200:
+                if res and res.status_code == 200:
                     raw_ai_output = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
                     parsed_json = json.loads(raw_ai_output)
                     st.session_state['generated_exam'] = parsed_json.get("exam_body", "")
@@ -289,32 +319,33 @@ if btn_call_ai:
                     st.session_state['ans_text_editor'] = parsed_json.get("answer_body", "")
                     st.success("🎉 題目與答案分流成功！")
                     st.rerun()
-                else: st.error(f"❌ API 出題報錯: {res.text}")
-            except Exception as e: st.error(f"❌ 解析失敗，請重試。原因: {str(e)}")
+                elif res and res.status_code == 429:
+                    st.error("⚠️ 【免費額度已耗盡】您今日已達到 Google Gemini 20次 的免費調用上限。請等待 1-2 分鐘再點擊「呼叫 Gemini AI」重試，或者更換 API Key。")
+                else:
+                    err_detail = res.text if res else "網絡超時，連線失敗"
+                    st.error(f"❌ API 出題報錯: {err_detail}")
+            except Exception as e:
+                st.error(f"❌ 解析失敗，請重試。原因: {str(e)}")
 
 # ==========================================
-# 3. 獨立原始碼控制台 (雙區獨立) - 100% 安全無衝突更新
+# 3. 獨立原始碼控制台 (雙區獨立)
 # ==========================================
 st.write("---")
 st.header("📝 步驟三：獨立原始碼控制台 (雙區獨立)")
 col_edit1, col_edit2 = st.columns(2)
-
 with col_edit1:
     st.subheader("💻 題目原始碼暫存區")
-    def on_exam_change(): 
-        st.session_state['generated_exam'] = st.session_state['exam_text_editor']
-    # 巧妙利用安全 key 綁定，完全移除冗餘 value= 參數
+    if 'exam_text_editor' not in st.session_state: st.session_state['exam_text_editor'] = st.session_state['generated_exam']
+    def on_exam_change(): st.session_state['generated_exam'] = st.session_state['exam_text_editor']
     st.text_area("題目微調：", height=450, key="exam_text_editor", on_change=on_exam_change)
-
 with col_edit2:
     st.subheader("🔑 答案原始碼暫存區")
-    def on_ans_change(): 
-        st.session_state['generated_answers'] = st.session_state['ans_text_editor']
-    # 巧妙利用安全 key 綁定，完全移除冗餘 value= 參數
-    st.text_area("答案微調：", height=450, key="ans_text_editor", on_change=on_ans_change)
+    if 'ans_text_editor' not in st.session_state: st.session_state['ans_text_editor'] = st.session_state['generated_answers']
+    def on_ans_change(): st.session_state['generated_answers'] = st.session_state['ans_text_editor']
+    st.text_area("答案微調：", value=st.session_state['ans_text_editor'], height=450, key="ans_text_editor", on_change=on_ans_change)
 
 # ==========================================
-# 4. 視覺排版與控制台
+# 4. 視覺排版與控制台 (按鈕風格對齊合併)
 # ==========================================
 st.write("---")
 st.header("🎨 步驟四：視覺排版與打印導出")
