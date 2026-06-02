@@ -13,8 +13,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 跨廠牌大聯盟升級 v1.5.0：Gemini 🤝 OpenAI 🤝 DeepSeek 🤝 Claude 四強聯手！
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.5.0"
+# 🆕 升級 v1.5.1：引入多廠商智慧診斷引擎 (一秒看破貼錯密鑰還是 Quota 爆掉)
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.5.1"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -75,7 +75,6 @@ try:
     GITHUB_REPO = "rlsw"
     GITHUB_USER = "rlsw-collab"
     
-    # 🆕 讀取用家新增的其他三大廠牌 API 金鑰 (做安全保底防空值)
     OPENAI_TOKEN = st.secrets.get("AI_TOKEN", "")
     DEEPSEEK_TOKEN = st.secrets.get("DEEPSEEK_TOKEN", "")
     CLAUDE_TOKEN = st.secrets.get("CLAUDE_TOKEN", "")
@@ -98,31 +97,48 @@ def read_from_exam_vault():
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================
-# 🛡️ 跨廠牌大聯盟降級重試引擎（Cross-Provider Failover Engine）
+# 🛡️ 智慧多模型降級重試 ＆ 錯誤診斷引擎
 # ==========================================
-def call_multiverse_ai(payload_template, text_prompt):
+def call_multiverse_ai_with_diagnostics(payload_template, text_prompt):
     """
-    終極大聯盟鏈條：Gemini(3路) -> OpenAI GPT-4o -> DeepSeek V3 -> Claude 3.5
+    大聯盟鏈條：Gemini -> OpenAI -> DeepSeek -> Claude
+    回傳：(parsed_json, used_model, diagnostics_dict)
     """
+    diagnostics = {
+        "Google Gemini": "未測試",
+        "OpenAI (ChatGPT)": "未測試",
+        "DeepSeek": "未測試",
+        "Anthropic (Claude)": "未測試"
+    }
+
     # 1. 第一階段：Gemini 原生鏈條
     gemini_models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash"]
-    for g_model in gemini_models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={GEMINI_TOKEN}"
-        try:
-            res = requests.post(url, headers={"Content-Type": "application/json"}, json=payload_template, timeout=60)
-            if res.status_code == 200:
-                raw = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
-                st.toast(f"🤖 成功調用 Google 通道：{g_model}", icon="✅")
-                return json.loads(raw), g_model
-        except:
-            pass
-        st.toast(f"⚠️ Google {g_model} 配額已滿或超時，切換中...", icon="🔄")
+    gemini_errors = []
+    
+    if not GEMINI_TOKEN:
+        diagnostics["Google Gemini"] = "❌ 密碼箱未配妥 GEMINI_TOKEN 變數"
+    else:
+        for g_model in gemini_models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={GEMINI_TOKEN}"
+            try:
+                res = requests.post(url, headers={"Content-Type": "application/json"}, json=payload_template, timeout=60)
+                if res.status_code == 200:
+                    raw = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+                    st.toast(f"🤖 成功調用 Google 通道：{g_model}", icon="✅")
+                    return json.loads(raw), g_model, None
+                else:
+                    gemini_errors.append(f"[{g_model}] 狀態碼 {res.status_code}: {res.text[:120]}")
+            except Exception as e:
+                gemini_errors.append(f"[{g_model}] 連線異常: {str(e)[:80]}")
+            st.toast(f"⚠️ Google {g_model} 無法使用，切換中...", icon="🔄")
+        diagnostics["Google Gemini"] = " | ".join(gemini_errors)
 
-    # 2. 第二階段：OpenAI GPT-4o 通道 (使用用家提供的 AI_TOKEN)
-    if OPENAI_TOKEN:
+    # 2. 第二階段：OpenAI GPT-4o 通道
+    if not OPENAI_TOKEN:
+        diagnostics["OpenAI (ChatGPT)"] = "❌ 密碼箱未配妥 AI_TOKEN 變數"
+    else:
         st.toast("🚀 正在啟動第二防禦線：OpenAI GPT-4o 通道...", icon="⚡")
-        url = "https://api.openai.com/v1/chat/completures" # 保證格式相容
-        url = url.replace("completures", "completions")
+        url = "https://api.openai.com/v1/chat/completions"
         headers = {"Authorization": f"Bearer {OPENAI_TOKEN}", "Content-Type": "application/json"}
         openai_payload = {
             "model": "gpt-4o",
@@ -134,41 +150,49 @@ def call_multiverse_ai(payload_template, text_prompt):
             if res.status_code == 200:
                 raw = res.json()['choices'][0]['message']['content'].strip()
                 st.toast("🤖 成功調用 OpenAI 通道：GPT-4o", icon="✅")
-                return json.loads(raw), "gpt-4o"
-        except:
-            pass
-        st.toast("⚠️ OpenAI 通道配額已滿或故障，切換中...", icon="🔄")
+                return json.loads(raw), "gpt-4o", None
+            else:
+                diagnostics["OpenAI (ChatGPT)"] = f"❌ 狀態碼 {res.status_code}: {res.text[:200]}"
+        except Exception as e:
+            diagnostics["OpenAI (ChatGPT)"] = f"❌ 連線異常: {str(e)}"
+        st.toast("⚠️ OpenAI 通道失敗，切換中...", icon="🔄")
 
     # 3. 第三階段：DeepSeek V3 通道
-    if DEEPSEEK_TOKEN:
-        st.toast("🚀 正在啟動第三防禦線：DeepSeek V3 通道...", icon="⚡")
+    if not DEEPSEEK_TOKEN:
+        diagnostics["DeepSeek"] = "❌ 密碼箱未配妥 DEEPSEEK_TOKEN 變數"
+    else:
+        st.toast("🚀 正在啟動 Oasis 第三防禦線：DeepSeek V3...", icon="⚡")
         url = "https://api.deepseek.com/v1/chat/completions"
         headers = {"Authorization": f"Bearer {DEEPSEEK_TOKEN}", "Content-Type": "application/json"}
         ds_payload = {
             "model": "deepseek-chat",
             "response_format": {"type": "json_object"},
-            "messages": [{"role": "user", "content": text_prompt + "\n請確保務必回傳帶有 exam_body 和 answer_body 欄位的 JSON 物件。"}]
+            "messages": [{"role": "user", "content": text_prompt + "\n回傳帶有 exam_body 和 answer_body 欄位的 JSON。"}]
         }
         try:
             res = requests.post(url, headers=headers, json=ds_payload, timeout=60)
             if res.status_code == 200:
                 raw = res.json()['choices'][0]['message']['content'].strip()
                 st.toast("🤖 成功調用 DeepSeek 通道：V3", icon="✅")
-                return json.loads(raw), "deepseek-v3"
-        except:
-            pass
-        st.toast("⚠️ DeepSeek 通道配額已滿或故障，切換中...", icon="🔄")
+                return json.loads(raw), "deepseek-v3", None
+            else:
+                diagnostics["DeepSeek"] = f"❌ 狀態碼 {res.status_code}: {res.text[:200]}"
+        except Exception as e:
+            diagnostics["DeepSeek"] = f"❌ 連線異常: {str(e)}"
+        st.toast("⚠️ DeepSeek 通道失敗，切換中...", icon="🔄")
 
     # 4. 第四階段：Anthropic Claude 3.5 Sonnet 通道
-    if CLAUDE_TOKEN:
-        st.toast("🚀 正在啟動終極防禦線：Claude 3.5 Sonnet 通道...", icon="⚡")
+    if not CLAUDE_TOKEN:
+        diagnostics["Anthropic (Claude)"] = "❌ 密碼箱未配妥 CLAUDE_TOKEN 變數"
+    else:
+        st.toast("🚀 正在啟動終極防禦線：Claude 3.5...", icon="⚡")
         url = "https://api.anthropic.com/v1/messages"
         headers = {
             "x-api-key": CLAUDE_TOKEN,
             "anthropic-version": "2023-06-01",
             "content-type": "application/json"
         }
-        claude_prompt = text_prompt + "\n【重要：由於格式限制，請直接輸出純 JSON 字串，不要包含任何 markdown 標籤或 ```json。】"
+        claude_prompt = text_prompt + "\n直接輸出純 JSON 字串，不要包含 markdown 標籤。"
         claude_payload = {
             "model": "claude-3-5-sonnet-20241022",
             "max_tokens": 4000,
@@ -178,15 +202,16 @@ def call_multiverse_ai(payload_template, text_prompt):
             res = requests.post(url, headers=headers, json=claude_payload, timeout=75)
             if res.status_code == 200:
                 raw = res.json()['content'][0]['text'].strip()
-                # 預防性清洗 markdown 符號
                 raw = re.sub(r'^```json\s*', '', raw)
                 raw = re.sub(r'\s*```$', '', raw).strip()
-                st.toast("🤖 成功調用 Anthropic 通道：Claude 3.5 Sonnet", icon="✅")
-                return json.loads(raw), "claude-3.5-sonnet"
-        except:
-            pass
+                st.toast("🤖 成功調用 Anthropic 通道：Claude 3.5", icon="✅")
+                return json.loads(raw), "claude-3.5-sonnet", None
+            else:
+                diagnostics["Anthropic (Claude)"] = f"❌ 狀態碼 {res.status_code}: {res.text[:200]}"
+        except Exception as e:
+            diagnostics["Anthropic (Claude)"] = f"❌ 連線異常: {str(e)}"
 
-    return None, None
+    return None, None, diagnostics
 
 # ==========================================
 # 2. 輔助函式：圖片處理 & OCR 保底
@@ -208,7 +233,7 @@ def do_gemini_ocr_with_fallback(b64_list, gemini_token):
     models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash"]
     
     for model_id in models:
-        api_url = f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){model_id}:generateContent?key={gemini_token}"
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={gemini_token}"
         try:
             res = requests.post(api_url, headers={"Content-Type": "application/json"}, json=payload, timeout=40)
             if res.status_code == 200:
@@ -293,13 +318,11 @@ if 'generated_answers' not in st.session_state: st.session_state['generated_answ
 current_vault_ocr = read_from_exam_vault()
 vault_hash = str(len(current_vault_ocr)) + "_" + str(hash(current_vault_ocr))
 
-# 🧱 模組 1：基本資料設定
 st.header("📋 步驟一：基本資料與功能設定")
 col_meta1, col_meta2 = st.columns(2)
 with col_meta1: subject = st.selectbox("選擇科目", ["中文", "英文", "數學", "常識"])
 with col_meta2: grade = st.selectbox("選擇年級", ["小一", "小二", "小三", "小四", "小五", "小六"])
 
-# 🧱 模組 2：題型控制滑桿區
 st.write("##")
 st.markdown("### 🔢 設定各題型生成數量")
 col_s1, col_s2, col_s3, col_s4 = st.columns(4)
@@ -308,7 +331,6 @@ with col_s2: fill_count = st.slider("填充題 (題數)", 0, 30, 5, step=5)
 with col_s3: calc_count = st.slider("列式計算題 (題數)", 0, 30, 5, step=5)
 with col_s4: text_count = st.slider("長題目文字題 (題數)", 0, 30, 5, step=5)
 
-# 🧱 模組 3：智能出題範圍
 st.write("---")
 st.header("🎯 步驟二：設定出題範圍來源")
 range_mode = st.radio("範圍模式選擇：", ["提供範圍", "提供作業/工作紙"], horizontal=True)
@@ -333,7 +355,6 @@ if range_mode == "提供範圍":
             write_to_exam_vault(extracted_txt)
             st.success("✅ 文字解鎖成功！")
             st.rerun()
-    
     text_input_val = st.text_area("📝 在此修改或輸入考試範圍文字：", value=current_vault_ocr, height=250, key=f"ocr_box_{vault_hash}")
     if text_input_val != current_vault_ocr:
         write_to_exam_vault(text_input_val)
@@ -364,17 +385,14 @@ if btn_call_ai:
               "exam_body": "包含試卷大標題、班級姓名欄位、甲乙丙丁部副題目、題目。選擇題格式為 ○ A. 選項一 ○ B. 選項二...",
               "answer_body": "包含答案頁大標題、甲乙丙丁部、詳細計算過程及最終正確答案"
             }}
-            
             數量要求：多項選擇題{mc_instruction}、填充題{fill_instruction}、列式計算題{calc_instruction}、長題目{text_instruction}。
             分數格式：優先用純文字如 3/5 或 2 1/4，如果寫中文必須寫成標準的「5又6分之1」格式。
-            選擇題選項：必須使用 ○ A. 選項一 格式開頭。
             """
             if range_mode == "提供範圍":
                 text_prompt += f"\n🎯【出題內容命令】：請完全根據以下文本內容出題：\n「{final_vault_text}」\n"
             else:
                 text_prompt += f"\n🎯【出題內容命令】：請精準看懂提供之圖片工作紙考點，出一套相似且全新的題目！\n"
             
-            # 定義 Google Gemini 特用的 Schema Payload 模板
             payload_template = {
                 "contents": [{"parts": [{"text": text_prompt}]}],
                 "generationConfig": {
@@ -382,22 +400,21 @@ if btn_call_ai:
                     "responseSchema": {
                         "type": "OBJECT",
                         "properties": {
-                            "exam_body": {"type": "STRING", "description": "題目卷正文"},
-                            "answer_body": {"type": "STRING", "description": "詳細答案頁"}
+                            "exam_body": {"type": "STRING"},
+                            "answer_body": {"type": "STRING"}
                         },
                         "required": ["exam_body", "answer_body"]
                     }
                 }
             }
             
-            # 🌟 啟動多大腦降級分流引擎 🌟
-            parsed_json, used_model = call_multiverse_ai(payload_template, text_prompt)
+            # 🌟 調用全新智慧診斷引擎
+            parsed_json, used_model, diag_report = call_multiverse_ai_with_diagnostics(payload_template, text_prompt)
             
             try:
                 if parsed_json and "exam_body" in parsed_json:
                     ex_body = parsed_json.get("exam_body", "").replace("\\n", "\n").replace("\\\\n", "\n")
                     ans_body = parsed_json.get("answer_body", "").replace("\\n", "\n").replace("\\\\n", "\n")
-                    
                     st.session_state['generated_exam'] = ex_body
                     st.session_state['generated_answers'] = ans_body
                     st.session_state['exam_text_editor'] = ex_body
@@ -405,7 +422,11 @@ if btn_call_ai:
                     st.success(f"🎉 試卷大聯盟生成成功！(最終調用功臣通道: {used_model})")
                     st.rerun()
                 else:
-                    st.error("❌ 所有 AI 通道（Google、OpenAI、DeepSeek、Anthropic）均已耗盡或密鑰未配妥，請等候 30 秒再試。")
+                    # 🚀 報錯時彈出史詩級超清晰診斷控制面板
+                    st.error("❌ 全線 AI 通道均不可用！下方已為您抓取各家廠商底層原裝 Error Code 以供檢查：")
+                    for provider, err_msg in diag_report.items():
+                        st.markdown(f"**🧱 {provider} 通道診斷結果：**")
+                        st.code(err_msg, language="json")
             except Exception as e: 
                 st.error(f"❌ 解析大聯盟數據結構失敗。原因: {str(e)}")
 
@@ -427,7 +448,7 @@ with col_edit2:
     st.text_area("答案微調：", value=st.session_state['ans_text_editor'], height=450, key="ans_text_editor", on_change=on_ans_change)
 
 # ==========================================
-# 4. 視覺排版與控制台 (按鈕風格對齊合併)
+# 4. 視覺排版與控制台
 # ==========================================
 st.write("---")
 st.header("🎨 步驟四：視覺排版與打印導出")
@@ -453,13 +474,8 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
     <meta name="color-scheme" content="light">
     <style>
         :root {{ color-scheme: light !important; }}
-        html, body {{
-            background-color: white !important;
-            color: #000000 !important;
-            -webkit-text-fill-color: #000000 !important;
-        }}
+        html, body {{ background-color: white !important; color: #000000 !important; -webkit-text-fill-color: #000000 !important; }}
         #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; color: #000000 !important; padding: 20px; font-size: 16px; line-height: 2.3; }}
-        #exam-body p {{ margin-bottom: 16px; }}
         .exam-title-main {{ font-size: 26px !important; font-weight: 800 !important; text-align: center !important; margin-top: 25px !important; margin-bottom: 15px !important; letter-spacing: 2px; color: #000000 !important; }}
         .exam-user-info {{ font-size: 18px !important; font-weight: bold !important; text-align: center !important; margin-bottom: 35px !important; word-spacing: 15px; color: #000000 !important; }}
         .exam-section-header {{ font-size: 20px !important; font-weight: 800 !important; color: #000000 !important; margin-top: 30px !important; margin-bottom: 12px !important; border-left: 5px solid #000 !important; padding-left: 10px; }}
@@ -467,8 +483,6 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
         .v-frac .num {{ border-bottom: 1.5px solid #000000; padding-bottom: 2px; min-width: 14px; font-weight: 600; }}
         .v-frac .den {{ padding-top: 2px; min-width: 14px; font-weight: 600; }}
         .mc-option {{ margin-left: 20px; margin-top: 8px; margin-bottom: 8px; display: block !important; clear: both; color: #000000 !important; }}
-        .mc-ans {{ color: #ff4b4b !important; font-weight: bold; }}
-        .short-line {{ font-weight: bold; text-decoration: underline; color: #000000 !important; }}
         .question-text {{ font-weight: bold; margin-top: 25px; margin-bottom: 12px; color: #000000 !important; }}
         .fill-blank-row {{ margin-top: 14px; margin-bottom: 14px; color: #000000 !important; }}
         .write-zone {{ margin-top: 12px; margin-bottom: 25px; width: 100%; }}
