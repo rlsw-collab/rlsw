@@ -13,8 +13,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.5.1：引入多廠商智慧診斷引擎 (一秒看破貼錯密鑰還是 Quota 爆掉)
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.5.1"
+# 🆕 升級 v1.5.2：密鑰正名優化版 (正名 OPENAI_TOKEN ＆ 拔除 DeepSeek)
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.5.2"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -75,8 +75,8 @@ try:
     GITHUB_REPO = "rlsw"
     GITHUB_USER = "rlsw-collab"
     
-    OPENAI_TOKEN = st.secrets.get("AI_TOKEN", "")
-    DEEPSEEK_TOKEN = st.secrets.get("DEEPSEEK_TOKEN", "")
+    # 🆕 正式改用用家指定的 OPENAI_TOKEN 變數名
+    OPENAI_TOKEN = st.secrets.get("OPENAI_TOKEN", "")
     CLAUDE_TOKEN = st.secrets.get("CLAUDE_TOKEN", "")
 except Exception as e:
     st.error("❌ 未能在 Streamlit Secrets 中找到必要的基礎憑證 (GIT_TOKEN 或 GEMINI_TOKEN)。")
@@ -97,17 +97,15 @@ def read_from_exam_vault():
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================
-# 🛡️ 智慧多模型降級重試 ＆ 錯誤診斷引擎
+# 🛡️ 智慧多模型降級重試 ＆ 錯誤診斷引擎 (優化精簡版)
 # ==========================================
 def call_multiverse_ai_with_diagnostics(payload_template, text_prompt):
     """
-    大聯盟鏈條：Gemini -> OpenAI -> DeepSeek -> Claude
-    回傳：(parsed_json, used_model, diagnostics_dict)
+    大聯盟精簡鏈條：Gemini -> OpenAI (GPT-4o) -> Claude 3.5
     """
     diagnostics = {
         "Google Gemini": "未測試",
         "OpenAI (ChatGPT)": "未測試",
-        "DeepSeek": "未測試",
         "Anthropic (Claude)": "未測試"
     }
 
@@ -133,9 +131,9 @@ def call_multiverse_ai_with_diagnostics(payload_template, text_prompt):
             st.toast(f"⚠️ Google {g_model} 無法使用，切換中...", icon="🔄")
         diagnostics["Google Gemini"] = " | ".join(gemini_errors)
 
-    # 2. 第二階段：OpenAI GPT-4o 通道
+    # 2. 第二階段：OpenAI GPT-4o 通道 (使用全新的 OPENAI_TOKEN)
     if not OPENAI_TOKEN:
-        diagnostics["OpenAI (ChatGPT)"] = "❌ 密碼箱未配妥 AI_TOKEN 變數"
+        diagnostics["OpenAI (ChatGPT)"] = "❌ 密碼箱未配妥 OPENAI_TOKEN 變數"
     else:
         st.toast("🚀 正在啟動第二防禦線：OpenAI GPT-4o 通道...", icon="⚡")
         url = "https://api.openai.com/v1/chat/completions"
@@ -157,31 +155,7 @@ def call_multiverse_ai_with_diagnostics(payload_template, text_prompt):
             diagnostics["OpenAI (ChatGPT)"] = f"❌ 連線異常: {str(e)}"
         st.toast("⚠️ OpenAI 通道失敗，切換中...", icon="🔄")
 
-    # 3. 第三階段：DeepSeek V3 通道
-    if not DEEPSEEK_TOKEN:
-        diagnostics["DeepSeek"] = "❌ 密碼箱未配妥 DEEPSEEK_TOKEN 變數"
-    else:
-        st.toast("🚀 正在啟動 Oasis 第三防禦線：DeepSeek V3...", icon="⚡")
-        url = "https://api.deepseek.com/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {DEEPSEEK_TOKEN}", "Content-Type": "application/json"}
-        ds_payload = {
-            "model": "deepseek-chat",
-            "response_format": {"type": "json_object"},
-            "messages": [{"role": "user", "content": text_prompt + "\n回傳帶有 exam_body 和 answer_body 欄位的 JSON。"}]
-        }
-        try:
-            res = requests.post(url, headers=headers, json=ds_payload, timeout=60)
-            if res.status_code == 200:
-                raw = res.json()['choices'][0]['message']['content'].strip()
-                st.toast("🤖 成功調用 DeepSeek 通道：V3", icon="✅")
-                return json.loads(raw), "deepseek-v3", None
-            else:
-                diagnostics["DeepSeek"] = f"❌ 狀態碼 {res.status_code}: {res.text[:200]}"
-        except Exception as e:
-            diagnostics["DeepSeek"] = f"❌ 連線異常: {str(e)}"
-        st.toast("⚠️ DeepSeek 通道失敗，切換中...", icon="🔄")
-
-    # 4. 第四階段：Anthropic Claude 3.5 Sonnet 通道
+    # 3. 第三階段：Anthropic Claude 3.5 Sonnet 通道
     if not CLAUDE_TOKEN:
         diagnostics["Anthropic (Claude)"] = "❌ 密碼箱未配妥 CLAUDE_TOKEN 變數"
     else:
@@ -371,7 +345,7 @@ if btn_call_ai:
     if mc_count == 0 and fill_count == 0 and calc_count == 0 and text_count == 0:
         st.error("❌ 請至少將一項題型的滑桿調大於 0！")
     else:
-        with st.spinner("🚀 正在啟用全宇宙多廠商高可用模型鏈，並行破防出題中..."):
+        with st.spinner("🚀 正在啟用多廠商高可用模型鏈，並行破防出題中..."):
             contents = []
             final_vault_text = read_from_exam_vault()
             mc_instruction = f"必須剛好生成【{mc_count}】題。" if mc_count > 0 else "不要出 any 多項選擇題，甲部留空。"
@@ -408,7 +382,7 @@ if btn_call_ai:
                 }
             }
             
-            # 🌟 調用全新智慧診斷引擎
+            # 🌟 調用全新密鑰修正後的診斷引擎
             parsed_json, used_model, diag_report = call_multiverse_ai_with_diagnostics(payload_template, text_prompt)
             
             try:
@@ -422,7 +396,6 @@ if btn_call_ai:
                     st.success(f"🎉 試卷大聯盟生成成功！(最終調用功臣通道: {used_model})")
                     st.rerun()
                 else:
-                    # 🚀 報錯時彈出史詩級超清晰診斷控制面板
                     st.error("❌ 全線 AI 通道均不可用！下方已為您抓取各家廠商底層原裝 Error Code 以供檢查：")
                     for provider, err_msg in diag_report.items():
                         st.markdown(f"**🧱 {provider} 通道診斷結果：**")
