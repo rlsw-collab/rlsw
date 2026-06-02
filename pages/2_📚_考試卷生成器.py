@@ -14,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級至 v1.1.2：導入實體保險箱防丟機制
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.1.2"
+# 🆕 應您要求：大版本號更新為 v1.1.3 (直落式單欄完美排版版)
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.1.3"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -50,7 +50,6 @@ except Exception as e:
     st.error("❌ 未能在 Streamlit Secrets 中找到必要的憑證 (GIT_TOKEN 或 GEMINI_TOKEN)。")
     st.stop()
 
-# 🔒 完美移植默書 APP 的多用戶實體檔案保險箱，防止重刷時 TextBox 被清空
 def get_exam_vault_path():
     from streamlit.runtime.scriptrunner import get_script_run_ctx
     ctx = get_script_run_ctx()
@@ -140,146 +139,151 @@ def process_full_exam(raw_gemini_output):
     return python_layout_engine(raw_gemini_output, is_answer_key=False)
 
 # ==========================================
-# 3. Streamlit 網頁界面與數據控制
+# 3. Streamlit 網頁全新單欄直落式佈局 (Single Column Layout)
 # ==========================================
 if 'generated_exam' not in st.session_state: st.session_state['generated_exam'] = ""
 
-# 讀取實體保險箱當前的數據
 current_vault_ocr = read_from_exam_vault()
 vault_hash = str(len(current_vault_ocr)) + "_" + str(hash(current_vault_ocr))
 
-layout_col1, layout_col2 = st.columns([1, 1])
-
-with layout_col1:
-    st.subheader("📋 基本資料與功能設定")
+# 🧱 模組 1：基本資料設定
+st.header("📋 步驟一：基本資料與功能設定")
+col_meta1, col_meta2 = st.columns(2)
+with col_meta1:
     subject = st.selectbox("選擇科目", ["中文", "英文", "數學", "常識"])
+with col_meta2:
     grade = st.selectbox("選擇年級", ["小一", "小二", "小三", "小四", "小五", "小六"])
-    
-    st.markdown("🔢 **設定各題型生成數量：**")
-    mc_count = st.slider("1. 多項選擇題 (題數)", 0, 30, 5, step=5)
-    fill_count = st.slider("2. 填充題 (題數)", 0, 30, 5, step=5)
-    calc_count = st.slider("3. 列式計算題 (題數)", 0, 30, 5, step=5)
-    text_count = st.slider("4. 長題目文字題 (題數)", 0, 30, 5, step=5)
 
-    st.write("---")
-    st.markdown("🎯 **選擇範圍提供方式：**")
-    range_mode = st.radio("範圍模式：", ["提供範圍", "提供作業/工作紙"], horizontal=True)
-    
-    uploaded_files = st.file_uploader("上傳課本圖片或工作紙 (可多選)", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True)
-    
-    if uploaded_files:
-        img_files = [f for f in uploaded_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
-        if img_files:
-            st.markdown("📸 **上傳檔案預覽：**")
-            preview_cols = st.columns(min(len(img_files), 5))
-            for idx, f in enumerate(img_files):
-                with preview_cols[idx % 5]:
-                    st.image(Image.open(f), caption=f.name if len(f.name) < 12 else f.name[:9]+"...", use_container_width=True)
+# 🧱 模組 2：題型控制滑桿區 (全寬)
+st.write("##")
+st.markdown("### 🔢 設定各題型生成數量")
+col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+with col_s1: mc_count = st.slider("多項選擇題 (題數)", 0, 30, 5, step=5)
+with col_s2: fill_count = st.slider("填充題 (題數)", 0, 30, 5, step=5)
+with col_s3: calc_count = st.slider("列式計算題 (題數)", 0, 30, 5, step=5)
+with col_s4: text_count = st.slider("長題目文字題 (題數)", 0, 30, 5, step=5)
 
-    st.markdown("📝 **範圍與備忘文字框 (TextBox)：**")
-    
-    if range_mode == "提供範圍":
-        if uploaded_files and st.button("🔍 點擊執行 Gemini 圖片字元識別 (OCR)"):
-            with st.spinner("正在將圖片文字提取並寫入實體保險箱..."):
-                b64_list = [convert_image_to_base64(f.getvalue()) for f in uploaded_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
-                extracted_txt = do_gemini_ocr(b64_list)
-                write_to_exam_vault(extracted_txt) # 🔴 寫入保險箱檔案
-                st.success("✅ 文字解鎖成功！")
-                st.rerun()
-        
-        # 綁定實體保險箱
-        text_input_val = st.text_area("在此修改或輸入考試範圍文字：", value=current_vault_ocr, height=150, key=f"ocr_box_{vault_hash}")
-        if text_input_val != current_vault_ocr:
-            write_to_exam_vault(text_input_val)
-            current_vault_ocr = text_input_val
-        
-    else:
-        # 作業/工作紙模式：自動覆蓋保險箱內容
-        static_notice = "根據提供之作業/工作紙"
-        write_to_exam_vault(static_notice)
-        st.text_area("範圍狀態：", value=static_notice, height=60, disabled=True)
-
-    st.write("##")
-    package_name = st.text_input("請輸入這個考試包裹的名稱 (選填)")
-
-    # 🤖 點擊生成題目 (智慧判斷雙流向)
-    if st.button("🤖 步驟一：呼叫 Gemini AI 生成新題目", use_container_width=True):
-        if mc_count == 0 and fill_count == 0 and calc_count == 0 and text_count == 0:
-            st.error("❌ 請至少將一項題型的滑桿調大於 0！")
-        else:
-            with st.spinner("🚀 正在開啟 Gemini 雙向大腦，全面透視內容出題中..."):
-                contents = []
-                
-                # 重新撈取保險箱內最新、最穩定的文字
-                final_vault_text = read_from_exam_vault()
-                
-                prompt_text = f"""你是一位熟知香港小學課程、傳統名校考卷風格的資深老師。請為【香港小學{grade}】的學生，製作一份【{subject}】科測驗/考試卷。
-                
-                🎯【題型與數量滑桿硬命令】：
-                你出的題型和數量必須嚴格按照以下數字，不准多也不准少：
-                - 多項選擇題：【{mc_count}】題
-                - 填充題：【{fill_count}】題
-                - 列式計算題：【{calc_count}】題
-                - 長題目文字題：【{text_count}】題
-                """
-                
-                if range_mode == "提供範圍":
-                    prompt_text += f"\n🎯【出題內容命令】：請完全根據用家在 TextBox 提供並修改好的以下繁體教材文字內容進行出題：\n「{final_vault_text}」\n"
-                else:
-                    prompt_text += f"\n🎯【出題內容命令】：用家這次選擇了『提供作業/工作紙』模式。請你【一定要用視覺功能看懂】下方附帶的上傳圖片，全盤理解這些工作紙/作業裡面的題目核心概念、知識考點和題型難度，並根據圖片入面的實質內容出一套相似且全新嘅題目！\n"
-                
-                prompt_text += """
-                分數格式請一律採用最單純的數字加斜線表示（例如：3/5 或 2 1/4），乘號用 x，除號用 ÷。
-                選擇題格式：
-                1. 問題文字
-                ○ A. 選項一
-                ○ B. 選項二
-                ○ C. 選項三
-                ○ D. 選項四
-                試卷與答案頁中間使用 `---` 分割。"""
-                
-                contents.append(prompt_text)
-                
-                if uploaded_files:
-                    for f in uploaded_files:
-                        mime_type = "application/pdf" if f.name.endswith(".pdf") else "image/jpeg"
-                        contents.append({"mime_type": mime_type, "data": f.getvalue()})
-                
-                api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
-                payload_data = []
-                for item in contents:
-                    if isinstance(item, str): payload_data.append({"text": item})
-                    else: payload_data.append({"inline_data": {"mime_type": item["mime_type"], "data": base64.b64encode(item["data"]).decode("utf-8")}})
-                
-                try:
-                    res = requests.post(api_url, headers={"Content-Type": "application/json"}, json={"contents": [{"parts": payload_data}]})
-                    if res.status_code == 200:
-                        st.session_state['generated_exam'] = res.json()['candidates'][0]['content']['parts'][0]['text']
-                        st.success("🎉 考卷題目已成功對接生成！請點擊下方排版按鈕渲染。")
-                        st.rerun()
-                    else: st.error(f"❌ API 出題報錯: {res.text}")
-                except Exception as e: st.error(f"❌ 網絡異常: {str(e)}")
-
-with layout_col2:
-    st.subheader("📝 題目原始碼暫存區")
-    st.caption("💡 提示：你可以直接在這裡修改文字，或貼上之前的舊試卷，再點擊下方「排版渲染」進行測試。")
-    stored_text = st.text_area("試卷原始文本控制台", value=st.session_state['generated_exam'], height=520, key="exam_editor")
-    if stored_text != st.session_state['generated_exam']:
-        st.session_state['generated_exam'] = stored_text
-
+# 🧱 模組 3：智能出題範圍 (全寬)
 st.write("---")
-st.subheader("🎨 視覺排版測試與導出")
-btn_render = st.button("🎨 步驟二：執行 Python 引擎，更新試卷排版 🔄", type="primary", use_container_width=True)
+st.header("🎯 步驟二：設定出題範圍來源")
+range_mode = st.radio("範圍模式選擇：", ["提供範圍", "提供作業/工作紙"], horizontal=True)
+
+uploaded_files = st.file_uploader("上傳課本圖片或工作紙 (可多選，支援 PNG / JPG / JPEG / PDF)", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True)
+
+if uploaded_files:
+    img_files = [f for f in uploaded_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
+    if img_files:
+        st.markdown("📸 **上傳檔案預覽：**")
+        preview_cols = st.columns(min(len(img_files), 6)) # 橫向最多排 6 張
+        for idx, f in enumerate(img_files):
+            with preview_cols[idx % 6]:
+                st.image(Image.open(f), caption=f.name if len(f.name) < 15 else f.name[:12]+"...", use_container_width=True)
+
+# 🧱 模組 4：超大 TextBox 控制台 (橫向拉滿，高度對齊默書 APP 250)
+st.write("##")
+if range_mode == "提供範圍":
+    if uploaded_files and st.button("🔍 點擊執行 Gemini 圖片字元識別 (OCR)", use_container_width=True):
+        with st.spinner("正在將圖片文字提取並寫入實體保險箱..."):
+            b64_list = [convert_image_to_base64(f.getvalue()) for f in uploaded_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
+            extracted_txt = do_gemini_ocr(b64_list)
+            write_to_exam_vault(extracted_txt)
+            st.success("✅ 文字解鎖成功！")
+            st.rerun()
+    
+    # 🆕 應您要求：高達 250 且全寬的超實用 Text Area
+    text_input_val = st.text_area("📝 在此修改或輸入考試範圍文字：", value=current_vault_ocr, height=250, key=f"ocr_box_{vault_hash}")
+    if text_input_val != current_vault_ocr:
+        write_to_exam_vault(text_input_val)
+        current_vault_ocr = text_input_val
+    
+else:
+    static_notice = "根據提供之作業/工作紙"
+    write_to_exam_vault(static_notice)
+    st.text_area("📝 範圍狀態（已鎖定）：", value=static_notice, height=70, disabled=True)
+
+# 🤖 觸發 Gemini AI 出題按鈕
+st.write("##")
+btn_call_ai = st.button("🚀 呼叫 Gemini AI 生成新題目 🤖", type="secondary", use_container_width=True)
+
+if btn_call_ai:
+    if mc_count == 0 and fill_count == 0 and calc_count == 0 and text_count == 0:
+        st.error("❌ 請至少將一項題型的滑桿調大於 0！")
+    else:
+        with st.spinner("🚀 正在開啟 Gemini 雙向大腦，全面透視內容出題中..."):
+            contents = []
+            final_vault_text = read_from_exam_vault()
+            
+            prompt_text = f"""你是一位熟知香港小學課程、傳統名校考卷風格的資深老師。請為【香港小學{grade}】的學生，製作一份【{subject}】科測驗/考試卷。
+            
+            🎯【題型與數量滑桿硬命令】：
+            你出的題型和數量必須嚴格按照以下數字，不准多也不准少：
+            - 多項選擇題：【{mc_count}】題
+            - 填充題：【{fill_count}】題
+            - 列式計算題：【{calc_count}】題
+            - 長題目文字題：【{text_count}】題
+            """
+            
+            if range_mode == "提供範圍":
+                prompt_text += f"\n🎯【出題內容命令】：請完全根據用家在 TextBox 提供並修改好的以下繁體教材文字內容進行出題：\n「{final_vault_text}」\n"
+            else:
+                prompt_text += f"\n🎯【出題內容命令】：用家這次選擇了『提供作業/工作紙』模式。請你【一定要用視覺功能看懂】下方附帶的上傳圖片，全盤理解這些工作紙/作業裡面的題目核心概念、知識考點和題型難度，並根據圖片入面的實質內容出一套相似且全新嘅題目！\n"
+            
+            prompt_text += """
+            分數格式請一律採用最單純的數字加斜線表示（例如：3/5 或 2 1/4），乘號用 x，除號用 ÷。
+            選擇題格式：
+            1. 問題文字
+            ○ A. 選項一
+            ○ B. 選項二
+            ○ C. 選項三
+            ○ D. 選項四
+            試卷與答案頁中間使用 `---` 分割。"""
+            
+            contents.append(prompt_text)
+            
+            if uploaded_files:
+                for f in uploaded_files:
+                    mime_type = "application/pdf" if f.name.endswith(".pdf") else "image/jpeg"
+                    contents.append({"mime_type": mime_type, "data": f.getvalue()})
+            
+            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
+            payload_data = []
+            for item in contents:
+                if isinstance(item, str): payload_data.append({"text": item})
+                else: payload_data.append({"inline_data": {"mime_type": item["mime_type"], "data": base64.b64encode(item["data"]).decode("utf-8")}})
+            
+            try:
+                res = requests.post(api_url, headers={"Content-Type": "application/json"}, json={"contents": [{"parts": payload_data}]})
+                if res.status_code == 200:
+                    st.session_state['generated_exam'] = res.json()['candidates'][0]['content']['parts'][0]['text']
+                    st.success("🎉 考卷題目已成功對接生成！已送入下方控制台暫存區。")
+                    st.rerun()
+                else: st.error(f"❌ API 出題報錯: {res.text}")
+            except Exception as e: st.error(f"❌ 網絡異常: {str(e)}")
+
+# 🧱 模組 5：🆕 應您要求移到正中間的超大題目原始碼暫存區！
+st.write("---")
+st.header("📝 步驟三：題目原始碼暫存區")
+st.caption("💡 提示：你可以直接在這裡隨意修改出題字眼，或貼上之前的舊試卷，重刷網頁字也不會丟失。")
+
+stored_text = st.text_area("💻 試卷原始文本控制台 (橫向已拉滿，高達 600 行寬敞空間)：", value=st.session_state['generated_exam'], height=600, key="exam_editor")
+if stored_text != st.session_state['generated_exam']:
+    st.session_state['generated_exam'] = stored_text
+
+# 🧱 模組 6：純排版測試按鈕與導出區
+st.write("##")
+package_name = st.text_input("📦 請輸入這個考試包裹的名稱 (選填，用於儲存至 GitHub)")
+btn_render = st.button("🎨 步驟四：執行 Python 引擎，更新並渲染視覺排版 🔄", type="primary", use_container_width=True)
 
 # --- 試卷預覽與打印區塊 ---
 if st.session_state['generated_exam']:
+    st.write("##")
     tab1, tab2 = st.tabs(["📺 網頁完美預覽", "🖨️ 專業打印預覽 (支援直式分數)"])
     perfect_html_content = process_full_exam(st.session_state['generated_exam'])
     
     with tab1:
         st.markdown(f'<div id="preview-box">{perfect_html_content}</div>', unsafe_allow_html=True)
         if st.button("📝 儲存試卷文本 (exam.md) 到 GitHub"):
-            if not package_name: st.error("❌ 請先輸入包裹名稱！")
+            if not package_name: st.error("❌ 請先輸入包裹名稱才能儲存！")
             else:
                 if upload_to_github(f"exam_packages/{package_name}/exam.md", st.session_state['generated_exam']):
                     st.success(f"✅ 試卷成功儲存至 GitHub！")
