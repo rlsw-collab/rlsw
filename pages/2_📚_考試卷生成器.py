@@ -1,4 +1,4 @@
-import streamlit st
+import streamlit as st
 import requests
 import json
 import base64
@@ -14,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級至 v1.1.6：暴力容錯分數攔截 + 關鍵字強行分卷引擎
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.1.6"
+# 🆕 修正語法錯誤，跳升至 v1.1.7 終極穩定版
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.1.7"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -101,13 +101,12 @@ def do_gemini_ocr(b64_list):
     return "❌ 圖片辨識失敗，請重試或手動輸入。"
 
 # ==========================================
-# 🚀 🚀 Python 終極分數與視覺排版引擎 (v1.1.6 終極暴力進化版) 🚀 🚀
+# 🚀 🚀 Python 終極分數與視覺排版引擎 (v1.1.7 終極暴力進化版) 🚀 🚀
 # ==========================================
 def convert_to_vertical_fractions(text_content):
     """
     暴力過濾器：無視數字邊界，直接將所有畸形連體字拆開並渲染
     """
-    # 🔴 終極暴力修復：即便前後黏住了中文字，一樣強制切片
     text_content = text_content.replace("312", " 3 1/2 ")
     text_content = text_content.replace("213", " 2 1/3 ")
     text_content = text_content.replace("214", " 2 1/4 ")
@@ -169,15 +168,12 @@ def python_layout_engine(raw_text, is_answer_key=False):
 
 def process_full_exam(raw_gemini_output):
     """🔴 智能容錯：如果 AI 漏了寫 '---'，後台自動強制切片分卷"""
-    # 如果 AI 忘記給分割線，但文字裡明明有答案頁
     if "---" not in raw_gemini_output and ("🔑 答案頁" in raw_gemini_output or "香港小學小五 數學科測驗 - 答案" in raw_gemini_output):
-        # 暴力幫它補上分割線
         raw_gemini_output = raw_gemini_output.replace("🔑 答案頁", "---\n🔑 答案頁")
         raw_gemini_output = raw_gemini_output.replace("香港小學小五 數學科測驗 - 答案", "---\n香港小學小五 數學科測驗 - 答案")
 
     if "---" in raw_gemini_output:
         parts = raw_gemini_output.split("---")
-        # 智慧判斷哪一段是答題卷，哪一段是答案頁
         if "答案" in parts[0] or "Key" in parts[0] or "答：" in parts[0]:
             exam_part = parts[1]
             ans_part = parts[0]
@@ -266,7 +262,7 @@ if btn_call_ai:
             🎯【題型與數量滑桿硬命令】：
             你出的題型和數量必須嚴格按照以下數字，不准多也不准少：
             - 多項選擇題：【{mc_count}】題
-            - 填充題：【{fill_count}**題
+            - 填充題：【{fill_count}】題
             - 列式計算題：【{calc_count}】題
             - 長題目文字題：【{text_count}】題
             
