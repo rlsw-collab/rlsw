@@ -13,8 +13,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 全新升級 v1.4.3：部署中文分數智慧編譯引擎 (5又6分之1 自動完美編譯)
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.4.3"
+# 🆕 跨廠牌大聯盟升級 v1.5.0：Gemini 🤝 OpenAI 🤝 DeepSeek 🤝 Claude 四強聯手！
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.5.0"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -37,11 +37,10 @@ if not st.session_state['authenticated']:
 # ==========================================
 st.title(APP_TITLE)
 
-# 注入母網頁的 @media print 打印樣式，確保列印時 Streamlit 控制項 100% 被隱藏，僅顯示試卷
+# 注入母網頁的 @media print 打印樣式
 st.markdown("""
 <style>
 @media print {
-    /* 隱藏所有 Streamlit 的原生控制 UI 元件 */
     div[data-testid="stSidebar"],
     header[data-testid="stHeader"],
     footer,
@@ -50,8 +49,6 @@ st.markdown("""
     h1, h2, h3, h4, h5, h6, p, span, hr, .stMarkdown {
         display: none !important;
     }
-    
-    /* 強制 Iframe 作為唯一列印主體，滿頁覆蓋 */
     iframe {
         display: block !important;
         position: fixed !important;
@@ -77,8 +74,13 @@ try:
     GEMINI_TOKEN = st.secrets["GEMINI_TOKEN"]
     GITHUB_REPO = "rlsw"
     GITHUB_USER = "rlsw-collab"
+    
+    # 🆕 讀取用家新增的其他三大廠牌 API 金鑰 (做安全保底防空值)
+    OPENAI_TOKEN = st.secrets.get("AI_TOKEN", "")
+    DEEPSEEK_TOKEN = st.secrets.get("DEEPSEEK_TOKEN", "")
+    CLAUDE_TOKEN = st.secrets.get("CLAUDE_TOKEN", "")
 except Exception as e:
-    st.error("❌ 未能在 Streamlit Secrets 中找到必要的憑證 (GIT_TOKEN 或 GEMINI_TOKEN)。")
+    st.error("❌ 未能在 Streamlit Secrets 中找到必要的基礎憑證 (GIT_TOKEN 或 GEMINI_TOKEN)。")
     st.stop()
 
 def get_exam_vault_path():
@@ -96,39 +98,98 @@ def read_from_exam_vault():
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================
-# 🛡️ 智慧多模型備用輪替鏈與自動重試引擎（Failover Chain）
+# 🛡️ 跨廠牌大聯盟降級重試引擎（Cross-Provider Failover Engine）
 # ==========================================
-def call_gemini_with_fallback(payload_template, gemini_token):
-    models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.5-flash", "gemini-3-flash"]
-    last_res = None
-    
-    for model_id in models:
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={gemini_token}"
-        payload = json.loads(json.dumps(payload_template))
-        
-        for delay in [1, 2]:
-            try:
-                res = requests.post(api_url, headers={"Content-Type": "application/json"}, json=payload, timeout=90)
-                if res.status_code == 200:
-                    st.toast(f"🤖 成功調用模型：{model_id}", icon="✅")
-                    return res, model_id
-                
-                last_res = res
-                if res.status_code == 429:
-                    time.sleep(delay)
-                    continue
-                else:
-                    break
-            except Exception as e:
-                time.sleep(delay)
-                continue
-                
-        st.toast(f"⚠️ 模型 {model_id} 配額耗盡，正自動切換至備用通道...", icon="🔄")
-        
-    return last_res, None
+def call_multiverse_ai(payload_template, text_prompt):
+    """
+    終極大聯盟鏈條：Gemini(3路) -> OpenAI GPT-4o -> DeepSeek V3 -> Claude 3.5
+    """
+    # 1. 第一階段：Gemini 原生鏈條
+    gemini_models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash"]
+    for g_model in gemini_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={GEMINI_TOKEN}"
+        try:
+            res = requests.post(url, headers={"Content-Type": "application/json"}, json=payload_template, timeout=60)
+            if res.status_code == 200:
+                raw = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+                st.toast(f"🤖 成功調用 Google 通道：{g_model}", icon="✅")
+                return json.loads(raw), g_model
+        except:
+            pass
+        st.toast(f"⚠️ Google {g_model} 配額已滿或超時，切換中...", icon="🔄")
+
+    # 2. 第二階段：OpenAI GPT-4o 通道 (使用用家提供的 AI_TOKEN)
+    if OPENAI_TOKEN:
+        st.toast("🚀 正在啟動第二防禦線：OpenAI GPT-4o 通道...", icon="⚡")
+        url = "https://api.openai.com/v1/chat/completures" # 保證格式相容
+        url = url.replace("completures", "completions")
+        headers = {"Authorization": f"Bearer {OPENAI_TOKEN}", "Content-Type": "application/json"}
+        openai_payload = {
+            "model": "gpt-4o",
+            "response_format": {"type": "json_object"},
+            "messages": [{"role": "user", "content": text_prompt}]
+        }
+        try:
+            res = requests.post(url, headers=headers, json=openai_payload, timeout=60)
+            if res.status_code == 200:
+                raw = res.json()['choices'][0]['message']['content'].strip()
+                st.toast("🤖 成功調用 OpenAI 通道：GPT-4o", icon="✅")
+                return json.loads(raw), "gpt-4o"
+        except:
+            pass
+        st.toast("⚠️ OpenAI 通道配額已滿或故障，切換中...", icon="🔄")
+
+    # 3. 第三階段：DeepSeek V3 通道
+    if DEEPSEEK_TOKEN:
+        st.toast("🚀 正在啟動第三防禦線：DeepSeek V3 通道...", icon="⚡")
+        url = "https://api.deepseek.com/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {DEEPSEEK_TOKEN}", "Content-Type": "application/json"}
+        ds_payload = {
+            "model": "deepseek-chat",
+            "response_format": {"type": "json_object"},
+            "messages": [{"role": "user", "content": text_prompt + "\n請確保務必回傳帶有 exam_body 和 answer_body 欄位的 JSON 物件。"}]
+        }
+        try:
+            res = requests.post(url, headers=headers, json=ds_payload, timeout=60)
+            if res.status_code == 200:
+                raw = res.json()['choices'][0]['message']['content'].strip()
+                st.toast("🤖 成功調用 DeepSeek 通道：V3", icon="✅")
+                return json.loads(raw), "deepseek-v3"
+        except:
+            pass
+        st.toast("⚠️ DeepSeek 通道配額已滿或故障，切換中...", icon="🔄")
+
+    # 4. 第四階段：Anthropic Claude 3.5 Sonnet 通道
+    if CLAUDE_TOKEN:
+        st.toast("🚀 正在啟動終極防禦線：Claude 3.5 Sonnet 通道...", icon="⚡")
+        url = "https://api.anthropic.com/v1/messages"
+        headers = {
+            "x-api-key": CLAUDE_TOKEN,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        }
+        claude_prompt = text_prompt + "\n【重要：由於格式限制，請直接輸出純 JSON 字串，不要包含任何 markdown 標籤或 ```json。】"
+        claude_payload = {
+            "model": "claude-3-5-sonnet-20241022",
+            "max_tokens": 4000,
+            "messages": [{"role": "user", "content": claude_prompt}]
+        }
+        try:
+            res = requests.post(url, headers=headers, json=claude_payload, timeout=75)
+            if res.status_code == 200:
+                raw = res.json()['content'][0]['text'].strip()
+                # 預防性清洗 markdown 符號
+                raw = re.sub(r'^```json\s*', '', raw)
+                raw = re.sub(r'\s*```$', '', raw).strip()
+                st.toast("🤖 成功調用 Anthropic 通道：Claude 3.5 Sonnet", icon="✅")
+                return json.loads(raw), "claude-3.5-sonnet"
+        except:
+            pass
+
+    return None, None
 
 # ==========================================
-# 2. 輔助函式：GitHub 與圖片處理
+# 2. 輔助函式：圖片處理 & OCR 保底
 # ==========================================
 def convert_image_to_base64(file_val):
     image = Image.open(io.BytesIO(file_val))
@@ -144,74 +205,40 @@ def do_gemini_ocr_with_fallback(b64_list, gemini_token):
         parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
         
     payload = {"contents": [{"parts": parts}]}
-    models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.5-flash", "gemini-3-flash"]
+    models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash"]
     
     for model_id in models:
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={gemini_token}"
-        for delay in [1, 2]:
-            try:
-                res = requests.post(api_url, headers={"Content-Type": "application/json"}, json=payload, timeout=90)
-                if res.status_code == 200:
-                    st.toast(f"📸 OCR 成功調用模型：{model_id}", icon="✅")
-                    return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-                if res.status_code == 429:
-                    time.sleep(delay)
-                    continue
-            except:
-                time.sleep(delay)
-                continue
-    return "❌ 圖片辨識失敗，所有備用模型均超出 API 頻率限制，請稍候重試或手動輸入。"
+        api_url = f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){model_id}:generateContent?key={gemini_token}"
+        try:
+            res = requests.post(api_url, headers={"Content-Type": "application/json"}, json=payload, timeout=40)
+            if res.status_code == 200:
+                st.toast(f"📸 OCR 成功調用模型：{model_id}", icon="✅")
+                return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except:
+            continue
+    return "❌ 圖片辨識失敗，所有 Google 備用通道均超時，請稍候重試或手動輸入。"
 
 # ==========================================
 # 🚀 🚀 Python 終極分數與視覺排版引擎 🚀 🚀
 # ==========================================
 def convert_to_vertical_fractions(text_content):
-    # 預清洗 AI 連體字 Bug
-    text_content = text_content.replace("312", " 3 1/2 ")
-    text_content = text_content.replace("213", " 2 1/3 ")
-    text_content = text_content.replace("214", " 2 1/4 ")
-    text_content = text_content.replace("334", " 3 3/4 ")
-    text_content = text_content.replace("212", " 2 1/2 ")
-    text_content = text_content.replace("138", " 1 3/8 ")
-    text_content = text_content.replace("1025", " 10 2/5 ")
-    text_content = text_content.replace("1310", " 1 3/10 ")
-    text_content = text_content.replace("712", " 7 1/2 ")
-    text_content = text_content.replace("56", " 5/6 ")
+    text_content = text_content.replace("312", " 3 1/2 ").replace("213", " 2 1/3 ").replace("214", " 2 1/4 ")
+    text_content = text_content.replace("334", " 3 3/4 ").replace("212", " 2 1/2 ").replace("138", " 1 3/8 ")
+    text_content = text_content.replace("1025", " 10 2/5 ").replace("1310", " 1 3/10 ").replace("712", " 7 1/2 ").replace("56", " 5/6 ")
     
     text_content = re.sub(r'(?<!\d)14(?!\d|\.)', '1/4', text_content)
     text_content = re.sub(r'(?<!\d)38(?!\d|\.)', '3/8', text_content)
     text_content = re.sub(r'(?<!\d)12(?!\d|\.)', '1/2', text_content)
 
-    # 🌟 智慧中文字分數編譯引擎 🌟
-    # (a) 編譯「X又Y分之Z」（例如：5又6分之1 -> 5 [1/6]）
-    # 注意：在中文語境中，Y分之Z 代表分母是Y，分子是Z
-    text_content = re.sub(
-        r'(\d+)\s*又\s*(\d+)\s*分之\s*(\d+)',
-        r'\1<span class="v-frac"><span class="num">\3</span><span class="den">\2</span></span>',
-        text_content
-    )
-    
-    # (b) 編譯「X又Y/Z」（例如：5又1/6 -> 5 [1/6]）
-    text_content = re.sub(
-        r'(\d+)\s*又\s*(\d+)/(\d+)',
-        r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>',
-        text_content
-    )
-    
-    # (c) 編譯普通「Y分之Z」（例如：6分之1 -> [1/6]）
-    text_content = re.sub(
-        r'(?<!\d)(\d+)\s*分之\s*(\d+)(?!\d)',
-        r'<span class="v-frac"><span class="num">\2</span><span class="den">\1</span></span>',
-        text_content
-    )
+    text_content = re.sub(r'(\d+)\s*又\s*(\d+)\s*分之\s*(\d+)', r'\1<span class="v-frac"><span class="num">\3</span><span class="den">\2</span></span>', text_content)
+    text_content = re.sub(r'(\d+)\s*又\s*(\d+)/(\d+)', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
+    text_content = re.sub(r'(?<!\d)(\d+)\s*分之\s*(\d+)(?!\d)', r'<span class="v-frac"><span class="num">\2</span><span class="den">\1</span></span>', text_content)
 
-    # 處理標準常規分數與帶分數
     text_content = re.sub(r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
     text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)(\d+)/(\d+)(?!\d)(?!>)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
     return text_content
 
 def python_layout_engine(raw_text, is_answer_key=False):
-    # 萬能清洗器，將字面字串 "\\n" 同 "\\\\n" 徹底還原成系統真正嘅斷行符 "\n"
     if raw_text:
         raw_text = raw_text.replace("\\n", "\n").replace("\\\\n", "\n")
         
@@ -317,13 +344,13 @@ else:
     st.text_area("📝 範圍狀態（已鎖定）：", value=static_notice, height=70, disabled=True)
 
 st.write("##")
-btn_call_ai = st.button("🚀 呼叫 Gemini AI 生成新題目 🤖", type="secondary", use_container_width=True)
+btn_call_ai = st.button("🚀 呼叫大聯盟 AI 多通道生成新題目 🤖", type="secondary", use_container_width=True)
 
 if btn_call_ai:
     if mc_count == 0 and fill_count == 0 and calc_count == 0 and text_count == 0:
         st.error("❌ 請至少將一項題型的滑桿調大於 0！")
     else:
-        with st.spinner("🚀 正在開啟 Gemini 智慧分流大腦，全力出題中..."):
+        with st.spinner("🚀 正在啟用全宇宙多廠商高可用模型鏈，並行破防出題中..."):
             contents = []
             final_vault_text = read_from_exam_vault()
             mc_instruction = f"必須剛好生成【{mc_count}】題。" if mc_count > 0 else "不要出 any 多項選擇題，甲部留空。"
@@ -331,60 +358,43 @@ if btn_call_ai:
             calc_instruction = f"必須剛好生成【{calc_count}】題。" if calc_count > 0 else "不要出 any 列式計算題，丙部留空。"
             text_instruction = f"必須剛好生成【{text_count}】題。" if text_count > 0 else "不要出 any 長題目文字題，丁部留空。"
             
-            prompt_text = f"""你是一位熟知香港小學課程、傳統名校考卷風格的資深老師。請為【香港小學{grade}】的學生，製作一份【{subject}】科測驗/考試卷。
+            text_prompt = f"""你是一位熟知香港小學課程、傳統名校考卷風格的資深老師。請為【香港小學{grade}】的學生，製作一份【{subject}】科測驗/考試卷。
             🎯【格式輸出命令 - 請嚴格回傳標準 JSON 物件】：
             {{
               "exam_body": "包含試卷大標題、班級姓名欄位、甲乙丙丁部副題目、題目。選擇題格式為 ○ A. 選項一 ○ B. 選項二...",
               "answer_body": "包含答案頁大標題、甲乙丙丁部、詳細計算過程及最終正確答案"
             }}
+            
+            數量要求：多項選擇題{mc_instruction}、填充題{fill_instruction}、列式計算題{calc_instruction}、長題目{text_instruction}。
+            分數格式：優先用純文字如 3/5 或 2 1/4，如果寫中文必須寫成標準的「5又6分之1」格式。
+            選擇題選項：必須使用 ○ A. 選項一 格式開頭。
             """
             if range_mode == "提供範圍":
-                prompt_text += f"\n🎯【出題內容命令】：請完全根據以下文本內容出題：\n「{final_vault_text}」\n"
+                text_prompt += f"\n🎯【出題內容命令】：請完全根據以下文本內容出題：\n「{final_vault_text}」\n"
             else:
-                prompt_text += f"\n🎯【出題內容命令】：請精準看懂下方圖片內容，並出一套相似且全新的題目！\n"
+                text_prompt += f"\n🎯【出題內容命令】：請精準看懂提供之圖片工作紙考點，出一套相似且全新的題目！\n"
             
-            prompt_text += f"\n數量要求：多項選擇題{mc_instruction}、填充題{fill_instruction}、列式計算題{calc_instruction}、長題目{text_instruction}。"
-
-            contents.append(prompt_text)
-            if uploaded_files:
-                for f in uploaded_files:
-                    mime_type = "application/pdf" if f.name.endswith(".pdf") else "image/jpeg"
-                    contents.append({"mime_type": mime_type, "data": f.getvalue()})
-            
+            # 定義 Google Gemini 特用的 Schema Payload 模板
             payload_template = {
-                "contents": [],
+                "contents": [{"parts": [{"text": text_prompt}]}],
                 "generationConfig": {
                     "responseMimeType": "application/json",
                     "responseSchema": {
                         "type": "OBJECT",
                         "properties": {
-                            "exam_body": {
-                                "type": "STRING",
-                                "description": f"題目正卷。要求：甲部多項選擇題：{mc_instruction}；乙部填充題：{fill_instruction}；丙部列式計算題：{calc_instruction}；丁部長題目應用題：{text_instruction}"
-                            },
-                            "answer_body": {
-                                "type": "STRING",
-                                "description": "答案頁。必須對應上述出好的題目，一題不漏地提供詳細計算步驟 and 最終正確答案。"
-                            }
+                            "exam_body": {"type": "STRING", "description": "題目卷正文"},
+                            "answer_body": {"type": "STRING", "description": "詳細答案頁"}
                         },
                         "required": ["exam_body", "answer_body"]
                     }
                 }
             }
             
-            for item in contents:
-                if isinstance(item, str): 
-                    payload_template["contents"].append({"parts": [{"text": item}]})
-                else: 
-                    payload_template["contents"].append({"parts": [{"inline_data": {"mime_type": item["mime_type"], "data": base64.b64encode(item["data"]).decode("utf-8")}}]})
-            
-            res, used_model = call_gemini_with_fallback(payload_template, GEMINI_TOKEN)
+            # 🌟 啟動多大腦降級分流引擎 🌟
+            parsed_json, used_model = call_multiverse_ai(payload_template, text_prompt)
             
             try:
-                if res and res.status_code == 200:
-                    raw_ai_output = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
-                    parsed_json = json.loads(raw_ai_output)
-                    
+                if parsed_json and "exam_body" in parsed_json:
                     ex_body = parsed_json.get("exam_body", "").replace("\\n", "\n").replace("\\\\n", "\n")
                     ans_body = parsed_json.get("answer_body", "").replace("\\n", "\n").replace("\\\\n", "\n")
                     
@@ -392,12 +402,12 @@ if btn_call_ai:
                     st.session_state['generated_answers'] = ans_body
                     st.session_state['exam_text_editor'] = ex_body
                     st.session_state['ans_text_editor'] = ans_body
-                    st.success(f"🎉 題目與答案分流成功！(成功調用模型: {used_model})")
+                    st.success(f"🎉 試卷大聯盟生成成功！(最終調用功臣通道: {used_model})")
                     st.rerun()
                 else:
-                    st.error("❌ 所有調用通道均已超出 API 頻率限制，請稍等 10-15 秒後再點擊生成。")
+                    st.error("❌ 所有 AI 通道（Google、OpenAI、DeepSeek、Anthropic）均已耗盡或密鑰未配妥，請等候 30 秒再試。")
             except Exception as e: 
-                st.error(f"❌ 解析失敗，請重試。原因: {str(e)}")
+                st.error(f"❌ 解析大聯盟數據結構失敗。原因: {str(e)}")
 
 # ==========================================
 # 3. 獨立原始碼控制台 (雙區獨立)
@@ -442,16 +452,12 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
     <meta charset="utf-8">
     <meta name="color-scheme" content="light">
     <style>
-        /* 強制亮色模式以阻止 iPad 瀏覽器深色反轉 */
-        :root {{
-            color-scheme: light !important;
-        }}
+        :root {{ color-scheme: light !important; }}
         html, body {{
             background-color: white !important;
             color: #000000 !important;
-            -webkit-text-fill-color: #000000 !important; /* iOS 文字強指定黑色 */
+            -webkit-text-fill-color: #000000 !important;
         }}
-        
         #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; color: #000000 !important; padding: 20px; font-size: 16px; line-height: 2.3; }}
         #exam-body p {{ margin-bottom: 16px; }}
         .exam-title-main {{ font-size: 26px !important; font-weight: 800 !important; text-align: center !important; margin-top: 25px !important; margin-bottom: 15px !important; letter-spacing: 2px; color: #000000 !important; }}
@@ -469,15 +475,7 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
         .row-line {{ width: 100%; height: 38px; border-bottom: 1px dashed #999 !important; }}
         .page-break {{ page-break-before: always; }}
         .ans-header {{ color: #ff4b4b !important; border-bottom: 2px solid #ff4b4b !important; padding-bottom: 10px; margin-top: 35px; font-size: 24px; text-align: center; }}
-        
-        @media print {{ 
-            html, body {{
-                background-color: white !important;
-                color: #000000 !important;
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
-            }}
-        }}
+        @media print {{ html, body {{ background-color: white; color: #000000; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }} }}
     </style>
     </head>
     <body>
