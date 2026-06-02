@@ -13,8 +13,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 UI 介面精簡升級 v1.3.4：統一標頭樣式 + 操作動線優化
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.3.4"
+# 🆕 UI 按鈕風格與佈局統一升級 v1.3.5
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.3.5"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -115,7 +115,6 @@ def convert_to_vertical_fractions(text_content):
     return text_content
 
 def python_layout_engine(raw_text, is_answer_key=False):
-    # 行內選項斷行清洗
     raw_text = re.sub(r'\s*([○●]\s*[A-D]\.)', r'\n\1', raw_text)
     raw_text = convert_to_vertical_fractions(raw_text)
     lines = raw_text.split('\n')
@@ -227,10 +226,10 @@ if btn_call_ai:
         with st.spinner("🚀 正在開啟 Gemini 智慧分流大腦，全力出題中..."):
             contents = []
             final_vault_text = read_from_exam_vault()
-            mc_instruction = f"必須剛好生成【{mc_count}】題。" if mc_count > 0 else "不要出任何多項選擇題，甲部留空。"
-            fill_instruction = f"必須剛好生成【{fill_count}】題。" if fill_count > 0 else "不要出任何填充題，乙部留空。"
-            calc_instruction = f"必須剛好生成【{calc_count}】題。" if calc_count > 0 else "不要出任何列式計算題，丙部留空。"
-            text_instruction = f"必須剛好生成【{text_count}】題。" if text_count > 0 else "不要出任何長題目文字題，丁部留空。"
+            mc_instruction = f"必須剛好生成【{mc_count}】題。" if mc_count > 0 else "不要出 any 多項選擇題，甲部留空。"
+            fill_instruction = f"必須剛好生成【{fill_count}】題。" if fill_count > 0 else "不要出 any 填充題，乙部留空。"
+            calc_instruction = f"必須剛好生成【{calc_count}】題。" if calc_count > 0 else "不要出 any 列式計算題，丙部留空。"
+            text_instruction = f"必須剛好生成【{text_count}】題。" if text_count > 0 else "不要出 any 長題目文字題，丁部留空。"
             
             prompt_text = f"""你是一位熟知香港小學課程、傳統名校考卷風格的資深老師。請為【香港小學{grade}】的學生，製作一份【{subject}】科測驗/考試卷。
             🎯【格式輸出命令 - 請嚴格回傳標準 JSON 物件】：
@@ -272,7 +271,7 @@ if btn_call_ai:
                 else: payload["contents"].append({"parts": [{"inline_data": {"mime_type": item["mime_type"], "data": base64.b64encode(item["data"]).decode("utf-8")}}]})
             
             try:
-                res = requests.post(api_url, headers={"Content-Type": "application/json"}, json=payload)
+                res = requests.post(api_url, headers={"Content-Type": "application/json"}, json={f"contents": payload["contents"], "generationConfig": payload["generationConfig"]})
                 if res.status_code == 200:
                     raw_ai_output = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
                     parsed_json = json.loads(raw_ai_output)
@@ -285,7 +284,9 @@ if btn_call_ai:
                 else: st.error(f"❌ API 出題報錯: {res.text}")
             except Exception as e: st.error(f"❌ 解析失敗，請重試。原因: {str(e)}")
 
+# ==========================================
 # 🧱 模組 5：雙暫存區控制台
+# ==========================================
 st.write("---")
 st.header("📝 步驟三：獨立原始碼控制台 (雙區獨立)")
 col_edit1, col_edit2 = st.columns(2)
@@ -300,10 +301,19 @@ with col_edit2:
     def on_ans_change(): st.session_state['generated_answers'] = st.session_state['ans_text_editor']
     st.text_area("答案微調：", value=st.session_state['ans_text_editor'], height=450, key="ans_text_editor", on_change=on_ans_change)
 
-# 🧱 模組 6：🆕 步驟四標頭統一樣式 + 操作鈕
+# ==========================================
+# 🧱 模組 6：🆕 步驟四：視覺排版與控制台 (按鈕風格對齊合併)
+# ==========================================
 st.write("---")
 st.header("🎨 步驟四：視覺排版與打印導出")
-btn_render = st.button("🔄 點擊執行 Python 引擎，更新並渲染視覺排版", type="primary", use_container_width=True)
+
+# 應您要求：兩個按鈕放在一齊，並且全部調用白色底 (type="secondary")
+col_btn1, col_btn2 = st.columns(2)
+with col_btn1:
+    btn_render = st.button("🔄 點擊執行 Python 引擎，更新視覺排版", type="secondary", use_container_width=True)
+with col_btn2:
+    # 巧妙利用特殊元件結合 iframe 呼叫外部列印命令
+    trigger_print = st.button("🖨️ 立即列印本試卷 / 匯出 PDF", type="secondary", use_container_width=True)
 
 if st.session_state['generated_exam'] or st.session_state['generated_answers']:
     st.write("##")
@@ -311,37 +321,43 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
     perfect_ans_html = python_layout_engine(st.session_state['generated_answers'], is_answer_key=True)
     full_html_content = perfect_exam_html + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁 (Answer Key)</h2>' + perfect_ans_html
     
+    # 如果用家按下立即列印，將 JavaScript 的 window.print() 設為自動執行狀態
+    auto_print_js = "window.print();" if trigger_print else ""
+    
     html_for_printing = f"""
     <!DOCTYPE html>
     <html>
     <head>
     <meta charset="utf-8">
     <style>
-        .print-control-bar {{ background-color: #f0f2f6; padding: 15px; border-radius: 8px; margin-bottom: 20px; }}
-        .print-btn {{ background-color: #ff4b4b; color: white; border: none; padding: 10px 20px; font-size: 18px; font-weight: bold; border-radius: 5px; cursor: pointer; }}
-        #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; color: #000000; padding: 30px; font-size: 16px; line-height: 2.3; }}
+        #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; color: #000000; padding: 20px; font-size: 16px; line-height: 2.3; }}
+        #exam-body p {{ margin-bottom: 16px; }}
+        
         .exam-title-main {{ font-size: 26px !important; font-weight: 800 !important; text-align: center !important; margin-top: 25px !important; margin-bottom: 15px !important; letter-spacing: 2px; }}
         .exam-user-info {{ font-size: 18px !important; font-weight: bold !important; text-align: center !important; margin-bottom: 35px !important; word-spacing: 15px; }}
         .exam-section-header {{ font-size: 20px !important; font-weight: 800 !important; color: #000000 !important; margin-top: 30px !important; margin-bottom: 12px !important; border-left: 5px solid #000; padding-left: 10px; }}
+        
         .v-frac {{ display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; line-height: 1.0; padding: 0 4px; font-size: 0.85em; position: relative; top: -0.15em; }}
         .v-frac .num {{ border-bottom: 1.5px solid #000000; padding-bottom: 2px; min-width: 14px; font-weight: 600; }}
         .v-frac .den {{ padding-top: 2px; min-width: 14px; font-weight: 600; }}
+        
         .mc-option {{ margin-left: 20px; margin-top: 8px; margin-bottom: 8px; display: block !important; clear: both; }}
         .mc-ans {{ color: #ff4b4b; font-weight: bold; }}
+        .short-line {{ font-weight: bold; text-decoration: underline; color: #000; }}
+        
         .question-text {{ font-weight: bold; margin-top: 25px; margin-bottom: 12px; }}
         .fill-blank-row {{ margin-top: 14px; margin-bottom: 14px; }}
         .write-zone {{ margin-top: 12px; margin-bottom: 25px; width: 100%; }}
         .row-line {{ width: 100%; height: 38px; border-bottom: 1px dashed #999; }}
+        
         .page-break {{ page-break-before: always; }}
         .ans-header {{ color: #ff4b4b; border-bottom: 2px solid #ff4b4b; padding-bottom: 10px; margin-top: 35px; font-size: 24px; text-align: center; }}
-        @media print {{ .print-control-bar {{ display: none; }} body {{ background-color: white; }} }}
+        @media print {{ body {{ background-color: white; }} }}
     </style>
     </head>
     <body>
-        <div class="print-control-bar">
-            <button class="print-btn" onclick="window.print()">🖨️ 立即打印本試卷 (已更新渲染)</button>
-        </div>
         <div id="exam-body">{full_html_content}</div>
+        <script>{auto_print_js}</script>
     </body>
     </html>
     """
