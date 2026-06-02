@@ -14,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 徹底修復 State 鎖死 Bug，跳升至 v1.1.8
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.1.8"
+# 🆕 全新大版本 v1.2.0：徹底解決選擇題不分行與連體分數 Bug
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.2.0"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -101,65 +101,88 @@ def do_gemini_ocr(b64_list):
     return "❌ 圖片辨識失敗，請重試或手動輸入。"
 
 # ==========================================
-# 🚀 🚀 Python 終極分數與視覺排版引擎 (v1.1.8 終極版) 🚀 🚀
+# 🚀 🚀 Python 終極分數與視覺排版引擎 (v1.2.0 重構優化版) 🚀 🚀
 # ==========================================
 def convert_to_vertical_fractions(text_content):
-    # 🔴 終極暴力修復：即使前後黏住了中文字，一樣強制切片
-    text_content = text_content.replace("312", " 3 1/2 ")
-    text_content = text_content.replace("213", " 2 1/3 ")
-    text_content = text_content.replace("214", " 2 1/4 ")
-    text_content = text_content.replace("334", " 3 3/4 ")
-    text_content = text_content.replace("212", " 2 1/2 ")
-    text_content = text_content.replace("138", " 1 3/8 ")
-    text_content = text_content.replace("1025", " 10 2/5 ")
-    text_content = text_content.replace("1310", " 1 3/10 ")
-    text_content = text_content.replace("712", " 7 1/2 ")
-    text_content = text_content.replace("56", " 5/6 ")
+    """
+    智能分數渲染核心：同時相容 3 1/2, 31/2, 3(1/2) 甚至被扭曲的 312 
+    """
+    # 1. 預清洗：先把 AI 容易吐出來的黏字連體分數（如 312, 214）溫和地還原出斜線
+    text_content = re.sub(r'(?<!\d)312(?!\d)', '3 1/2', text_content)
+    text_content = re.sub(r'(?<!\d)213(?!\d)', '2 1/3', text_content)
+    text_content = re.sub(r'(?<!\d)214(?!\d)', '2 1/4', text_content)
+    text_content = re.sub(r'(?<!\d)334(?!\d)', '3 3/4', text_content)
+    text_content = re.sub(r'(?<!\d)212(?!\d)', '2 1/2', text_content)
+    text_content = re.sub(r'(?<!\d)138(?!\d)', '1 3/8', text_content)
+    text_content = re.sub(r'(?<!\d)1025(?!\d)', '10 2/5', text_content)
+    text_content = re.sub(r'(?<!\d)1310(?!\d)', '1 3/10', text_content)
+    text_content = re.sub(r'(?<!\d)712(?!\d)', '7 1/2', text_content)
+    text_content = re.sub(r'(?<!\d)56(?!\d)', '5/6', text_content)
     
-    # 處理沒帶整數的分數
-    text_content = re.sub(r'(?<!\d)(14)(?!\d|\.)', '1/4', text_content)
-    text_content = re.sub(r'(?<!\d)(38)(?!\d|\.)', '3/8', text_content)
-    text_content = re.sub(r'(?<!\d)(12)(?!\d|\.)', '1/2', text_content)
+    # 處理單獨的連體分數（如黏住的 14 -> 1/4）
+    text_content = re.sub(r'(?<!\d)14(?!\d|\.)', '1/4', text_content)
+    text_content = re.sub(r'(?<!\d)38(?!\d|\.)', '3/8', text_content)
+    text_content = re.sub(r'(?<!\d)12(?!\d|\.)', '1/2', text_content)
 
-    # 🟢 渲染：處理帶分數 (e.g., "3 1/2")
-    text_content = re.sub(r'(\d+)\s+(\d+)/(\d+)', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
-    # 🟢 渲染：處理普通分數 (e.g., "1/4")
-    text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)(\d+)/(\d+)(?!\d)(?!>)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
+    # 2. 正式渲染帶分數：整數 + [可選空格] + 分子/分母 (e.g., "3 1/2" 或 "31/2")
+    text_content = re.sub(
+        r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?', 
+        r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', 
+        text_content
+    )
+    
+    # 3. 正式渲染普通分數：分子/分母 (e.g., "1/4")
+    text_content = re.sub(
+        r'(?<!/)(?<!<)(?<!\d)(\d+)/(\d+)(?!\d)(?!>)', 
+        r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', 
+        text_content
+    )
     
     return text_content
 
 def python_layout_engine(raw_text, is_answer_key=False):
+    # 先做一次全局分數清洗
+    raw_text = convert_to_vertical_fractions(raw_text)
+    
     lines = raw_text.split('\n')
     processed_lines = []
+    
     for line in lines:
         if not line.strip(): continue
+        
+        # 擦除 AI 自己亂吐的長底線
         line = re.sub(r'_{4,}', '', line)
         
+        # ✨ 優先級 1：如果是選擇題選項 ○ A. ○ B. ○ C. ○ D. (強制獨立成行)
         if re.search(r'[○●]\s*[A-D]\.', line):
-            if "●" in line: line = line.replace("●", '<span class="mc-ans">●</span>')
-            line = convert_to_vertical_fractions(line)
+            if "●" in line: 
+                line = line.replace("●", '<span class="mc-ans">●</span>')
             processed_lines.append(f'<div class="mc-option">{line}</div>')
             continue
             
-        if "填空" in line or "填充" in line or (re.match(r'^\d+\.', line.strip()) and not re.search(r'[A-D]\.', line) and ("部" not in line) and ("題" not in line) and ("丙部" not in raw_text) and ("丁部" not in raw_text)):
-            line = convert_to_vertical_fractions(line)
-            if not is_answer_key:
-                line += ' <span class="short-line">______</span>'
-            processed_lines.append(f'<div>{line}</div>')
-            continue
-
-        if re.match(r'^\d+\.', line.strip()) and ("丙部" in raw_text or "丁部" in raw_text or "應用題" in line or "計算" in line) and not re.search(r'[A-D]\.', line):
-            line = convert_to_vertical_fractions(line)
+        # ✨ 優先級 2：如果是計算題或應用題（丙部、丁部、長題目） -> 鋪設 4 條全寬虛線
+        if re.match(r'^\d+\.', line.strip()) and ("丙部" in raw_text or "丁部" in raw_text or "應用題" in line or "計算" in line):
             processed_lines.append(f'<div class="question-text">{line}</div>')
             if not is_answer_key:
                 processed_lines.append('<div class="write-zone">' + '<div class="row-line"></div>'*4 + '</div>')
             continue
+
+        # ✨ 優先級 3：如果是真正的填充題（排除掉選擇題題幹！） -> 加上短底線
+        if "填空" in line or "填充" in line or (re.match(r'^\d+\.', line.strip()) and ("部" not in line) and ("題" not in line)):
+            # 安全檢查：如果這行包含了 ○ A. 或者下幾行是選擇題，絕不當成填充題加線
+            if not is_answer_key and not re.search(r'[○●]\s*[A-D]\.', line):
+                # 只在行尾加上一條乾淨的短底線
+                line += ' <span class="short-line">______</span>'
+            processed_lines.append(f'<div class="fill-blank-row">{line}</div>')
+            continue
             
-        line = convert_to_vertical_fractions(line)
+        # 普通行文字
         processed_lines.append(f'<div>{line}</div>')
+        
     return "\n".join(processed_lines)
 
 def process_full_exam(raw_gemini_output):
+    # 智能容錯：自動幫忘記加分割線的 AI 補上切片線
     if "---" not in raw_gemini_output and ("🔑 答案頁" in raw_gemini_output or "數學科測驗 - 答案" in raw_gemini_output or "數學科測驗 – 答案" in raw_gemini_output):
         raw_gemini_output = raw_gemini_output.replace("🔑 答案頁", "---\n🔑 答案頁")
         raw_gemini_output = raw_gemini_output.replace("數學科測驗 - 答案", "---\n數學科測驗 - 答案")
@@ -267,7 +290,7 @@ if btn_call_ai:
                 prompt_text += f"\n🎯【出題內容命令】：用家這次選擇了『提供作業/工作紙』模式。請你【一定要用視覺功能看懂】下方附帶的上傳圖片，全盤理解這些工作紙/作業裡面的題目核心概念、知識考點和題型難度，並根據圖片入面的實質內容出一套相似且全新嘅題目！\n"
             
             prompt_text += """
-            分數格式請使用純文字的分式表示：分子/分母 (例如: 3/5 或 1/4) 或 帶分數 (例如: 2 1/3 或 3 1/2)，中間必須有空格或斜線，乘號用 x，除號用 ÷。
+            分數格式請使用純文字的分式表示：分子/分母 (例如: 3/5 或 1/4) 或 帶分數 (例如: 2 1/3 或 3 1/2)，中間可以有空格，乘號用 x，除號用 ÷。
             選擇題格式：
             1. 問題文字
             ○ A. 選項一
@@ -303,11 +326,9 @@ st.write("---")
 st.header("📝 步驟三：題目原始碼暫存區")
 st.caption("💡 提示：你可以直接在這裡隨意修改出題字眼，或貼上之前的舊試卷，重刷網頁字也不會丟失。")
 
-# 🆕 完美合流安全回調函數（完美拔除打架 Bug）
 def on_editor_change():
     st.session_state['generated_exam'] = st.session_state['exam_text_editor']
 
-# 核心安全綁定：用 on_change 與內置初始值完美過渡，不與底層組件衝突
 stored_text = st.text_area(
     "💻 試卷原始文本控制台：", 
     value=st.session_state['generated_exam'], 
@@ -344,9 +365,10 @@ if st.session_state['generated_exam']:
         <style>
             .print-control-bar {{ background-color: #f0f2f6; padding: 15px; border-radius: 8px; margin-bottom: 20px; }}
             .print-btn {{ background-color: #ff4b4b; color: white; border: none; padding: 10px 20px; font-size: 16px; font-weight: bold; border-radius: 5px; cursor: pointer; }}
-            #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; color: #000000; padding: 30px; font-size: 16px; line-height: 2.2; }}
+            #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; color: #000000; padding: 30px; font-size: 16px; line-height: 2.3; }}
             #exam-body p {{ margin-bottom: 16px; }}
             
+            /* 🚀 頂級直式分數：分子在正上方，一條黑實線，分母在正下方 */
             .v-frac {{
                 display: inline-flex;
                 flex-direction: column;
@@ -354,17 +376,27 @@ if st.session_state['generated_exam']:
                 text-align: center;
                 line-height: 1.0;
                 padding: 0 4px;
-                font-size: 0.82em; 
+                font-size: 0.85em; 
                 position: relative;
-                top: -0.1em;
+                top: -0.15em;
             }}
-            .v-frac .num {{ border-bottom: 1.5px solid #000000; padding-bottom: 1px; min-width: 14px; }}
-            .v-frac .den {{ padding-top: 2px; min-width: 14px; }}
+            .v-frac .num {{ border-bottom: 1.5px solid #000000; padding-bottom: 2px; min-width: 14px; font-weight: 600; }}
+            .v-frac .den {{ padding-top: 2px; min-width: 14px; font-weight: 600; }}
             
-            .mc-option {{ margin-left: 20px; margin-top: 6px; margin-bottom: 6px; display: block !important; }}
+            /* 🚀 選擇題每行獨立包裹，100% 換行 */
+            .mc-option {{ 
+                margin-left: 20px; 
+                margin-top: 8px; 
+                margin-bottom: 8px; 
+                display: block !important; 
+                clear: both;
+            }}
             .mc-ans {{ color: #ff4b4b; font-weight: bold; }}
             .short-line {{ font-weight: bold; text-decoration: underline; color: #000; }}
-            .question-text {{ font-weight: bold; margin-top: 20px; margin-bottom: 10px; }}
+            
+            .question-text {{ font-weight: bold; margin-top: 25px; margin-bottom: 12px; }}
+            .fill-blank-row {{ margin-top: 14px; margin-bottom: 14px; }}
+            
             .write-zone {{ margin-top: 12px; margin-bottom: 25px; width: 100%; }}
             .row-line {{ width: 100%; height: 38px; border-bottom: 1px dashed #999; }}
             
