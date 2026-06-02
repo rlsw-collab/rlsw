@@ -6,27 +6,11 @@ import datetime
 import time
 
 # ==========================================
-# 0. 網頁基本設定與【密碼鎖邏輯】
+# 0. 網頁基本設定 (歡迎頁已移除密碼鎖 🔓)
 # ==========================================
 st.set_page_config(page_title="AI 智能教學工具箱", layout="centered")
 
 APP_TITLE = "🎒 AI 智能教學工具箱"
-
-if 'authenticated' not in st.session_state:
-    st.session_state['authenticated'] = False
-
-if not st.session_state['authenticated']:
-    st.markdown(f"<h1 style='text-align: center; color: #4A90E2;'>{APP_TITLE}</h1>", unsafe_allow_html=True)
-    st.info("🔒 此工具受保護，請輸入密碼以解鎖並使用。")
-    pwd_input = st.text_input("輸入專屬訪問密碼：", type="password")
-    if st.button("解鎖 🔓"):
-        if pwd_input == "royroy":
-            st.session_state['authenticated'] = True
-            st.success("✅ 密碼正確！正在載入工具...")
-            st.rerun()
-        elif pwd_input != "":
-            st.error("❌ 密碼錯誤，請重試！")
-    st.stop()
 
 # ==========================================
 # 1. 讀取 Secrets 設定與計數器引擎
