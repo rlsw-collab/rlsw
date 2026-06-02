@@ -13,8 +13,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 UI 按鈕風格與佈局統一升級 v1.3.5 (標準黑色代碼塊回歸版)
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.3.5"
+# 🆕 UI 按鈕風格與佈局統一升級 v1.3.6 (Canvas 完美修復版)
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.3.6"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -158,10 +158,12 @@ def python_layout_engine(raw_text, is_answer_key=False):
     return "\n".join(processed_lines)
 
 # ==========================================
-# 3. Streamlit 網頁佈局
+# 3. Streamlit 網頁佈局 & 狀態機安全初始化
 # ==========================================
 if 'generated_exam' not in st.session_state: st.session_state['generated_exam'] = ""
 if 'generated_answers' not in st.session_state: st.session_state['generated_answers'] = ""
+if 'exam_text_editor' not in st.session_state: st.session_state['exam_text_editor'] = ""
+if 'ans_text_editor' not in st.session_state: st.session_state['ans_text_editor'] = ""
 
 current_vault_ocr = read_from_exam_vault()
 vault_hash = str(len(current_vault_ocr)) + "_" + str(hash(current_vault_ocr))
@@ -277,7 +279,7 @@ if btn_call_ai:
                 else: payload["contents"].append({"parts": [{"inline_data": {"mime_type": item["mime_type"], "data": base64.b64encode(item["data"]).decode("utf-8")}}]})
             
             try:
-                res = requests.post(api_url, headers={"Content-Type": "application/json"}, json={f"contents": payload["contents"], "generationConfig": payload["generationConfig"]})
+                res = requests.post(api_url, headers={"Content-Type": "application/json"}, json={"contents": payload["contents"], "generationConfig": payload["generationConfig"]})
                 if res.status_code == 200:
                     raw_ai_output = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
                     parsed_json = json.loads(raw_ai_output)
@@ -291,24 +293,28 @@ if btn_call_ai:
             except Exception as e: st.error(f"❌ 解析失敗，請重試。原因: {str(e)}")
 
 # ==========================================
-# 3. 獨立原始碼控制台 (雙區獨立)
+# 3. 獨立原始碼控制台 (雙區獨立) - 100% 安全無衝突更新
 # ==========================================
 st.write("---")
 st.header("📝 步驟三：獨立原始碼控制台 (雙區獨立)")
 col_edit1, col_edit2 = st.columns(2)
+
 with col_edit1:
     st.subheader("💻 題目原始碼暫存區")
-    if 'exam_text_editor' not in st.session_state: st.session_state['exam_text_editor'] = st.session_state['generated_exam']
-    def on_exam_change(): st.session_state['generated_exam'] = st.session_state['exam_text_editor']
-    st.text_area("題目微調：", value=st.session_state['exam_text_editor'], height=450, key="exam_text_editor", on_change=on_exam_change)
+    def on_exam_change(): 
+        st.session_state['generated_exam'] = st.session_state['exam_text_editor']
+    # 巧妙利用安全 key 綁定，完全移除冗餘 value= 參數
+    st.text_area("題目微調：", height=450, key="exam_text_editor", on_change=on_exam_change)
+
 with col_edit2:
     st.subheader("🔑 答案原始碼暫存區")
-    if 'ans_text_editor' not in st.session_state: st.session_state['ans_text_editor'] = st.session_state['generated_answers']
-    def on_ans_change(): st.session_state['generated_answers'] = st.session_state['ans_text_editor']
-    st.text_area("答案微調：", value=st.session_state['ans_text_editor'], height=450, key="ans_text_editor", on_change=on_ans_change)
+    def on_ans_change(): 
+        st.session_state['generated_answers'] = st.session_state['ans_text_editor']
+    # 巧妙利用安全 key 綁定，完全移除冗餘 value= 參數
+    st.text_area("答案微調：", height=450, key="ans_text_editor", on_change=on_ans_change)
 
 # ==========================================
-# 4. 視覺排版與控制台 (按鈕風格對齊合併)
+# 4. 視覺排版與控制台
 # ==========================================
 st.write("---")
 st.header("🎨 步驟四：視覺排版與打印導出")
