@@ -14,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 應您要求：大版本號更新為 v1.1.3 (直落式單欄完美排版版)
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.1.3"
+# 🆕 升級至 v1.1.4：完美鎖定暫存區編輯器文字防丟失
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.1.4"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -104,6 +104,7 @@ def do_gemini_ocr(b64_list):
 # 🚀 🚀 Python 終極分數與視覺排版引擎 🚀 🚀
 # ==========================================
 def convert_to_vertical_fractions(text_content):
+    # 智能攔截並轉化為上下直式分數
     text_content = re.sub(r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
     text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)(?<!">)(\d+)/(\d+)(?!\d)(?!>)(?!/body)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
     return text_content
@@ -139,9 +140,11 @@ def process_full_exam(raw_gemini_output):
     return python_layout_engine(raw_gemini_output, is_answer_key=False)
 
 # ==========================================
-# 3. Streamlit 網頁全新單欄直落式佈局 (Single Column Layout)
+# 3. Streamlit 網頁單欄直落式佈局
 # ==========================================
-if 'generated_exam' not in st.session_state: st.session_state['generated_exam'] = ""
+# 初始化 session_state
+if 'generated_exam' not in st.session_state: 
+    st.session_state['generated_exam'] = ""
 
 current_vault_ocr = read_from_exam_vault()
 vault_hash = str(len(current_vault_ocr)) + "_" + str(hash(current_vault_ocr))
@@ -149,12 +152,10 @@ vault_hash = str(len(current_vault_ocr)) + "_" + str(hash(current_vault_ocr))
 # 🧱 模組 1：基本資料設定
 st.header("📋 步驟一：基本資料與功能設定")
 col_meta1, col_meta2 = st.columns(2)
-with col_meta1:
-    subject = st.selectbox("選擇科目", ["中文", "英文", "數學", "常識"])
-with col_meta2:
-    grade = st.selectbox("選擇年級", ["小一", "小二", "小三", "小四", "小五", "小六"])
+with col_meta1: subject = st.selectbox("選擇科目", ["中文", "英文", "數學", "常識"])
+with col_meta2: grade = st.selectbox("選擇年級", ["小一", "小二", "小三", "小四", "小五", "小六"])
 
-# 🧱 模組 2：題型控制滑桿區 (全寬)
+# 🧱 模組 2：題型控制滑桿區
 st.write("##")
 st.markdown("### 🔢 設定各題型生成數量")
 col_s1, col_s2, col_s3, col_s4 = st.columns(4)
@@ -163,23 +164,23 @@ with col_s2: fill_count = st.slider("填充題 (題數)", 0, 30, 5, step=5)
 with col_s3: calc_count = st.slider("列式計算題 (題數)", 0, 30, 5, step=5)
 with col_s4: text_count = st.slider("長題目文字題 (題數)", 0, 30, 5, step=5)
 
-# 🧱 模組 3：智能出題範圍 (全寬)
+# 🧱 模組 3：智能出題範圍
 st.write("---")
 st.header("🎯 步驟二：設定出題範圍來源")
 range_mode = st.radio("範圍模式選擇：", ["提供範圍", "提供作業/工作紙"], horizontal=True)
 
-uploaded_files = st.file_uploader("上傳課本圖片或工作紙 (可多選，支援 PNG / JPG / JPEG / PDF)", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True)
+uploaded_files = st.file_uploader("上傳課本圖片或工作紙 (可多選)", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True)
 
 if uploaded_files:
     img_files = [f for f in uploaded_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
     if img_files:
         st.markdown("📸 **上傳檔案預覽：**")
-        preview_cols = st.columns(min(len(img_files), 6)) # 橫向最多排 6 張
+        preview_cols = st.columns(min(len(img_files), 6))
         for idx, f in enumerate(img_files):
             with preview_cols[idx % 6]:
                 st.image(Image.open(f), caption=f.name if len(f.name) < 15 else f.name[:12]+"...", use_container_width=True)
 
-# 🧱 模組 4：超大 TextBox 控制台 (橫向拉滿，高度對齊默書 APP 250)
+# 🧱 模組 4：超大 TextBox 控制台
 st.write("##")
 if range_mode == "提供範圍":
     if uploaded_files and st.button("🔍 點擊執行 Gemini 圖片字元識別 (OCR)", use_container_width=True):
@@ -190,7 +191,6 @@ if range_mode == "提供範圍":
             st.success("✅ 文字解鎖成功！")
             st.rerun()
     
-    # 🆕 應您要求：高達 250 且全寬的超實用 Text Area
     text_input_val = st.text_area("📝 在此修改或輸入考試範圍文字：", value=current_vault_ocr, height=250, key=f"ocr_box_{vault_hash}")
     if text_input_val != current_vault_ocr:
         write_to_exam_vault(text_input_val)
@@ -254,20 +254,36 @@ if btn_call_ai:
             try:
                 res = requests.post(api_url, headers={"Content-Type": "application/json"}, json={"contents": [{"parts": payload_data}]})
                 if res.status_code == 200:
-                    st.session_state['generated_exam'] = res.json()['candidates'][0]['content']['parts'][0]['text']
+                    ai_text_result = res.json()['candidates'][0]['content']['parts'][0]['text']
+                    
+                    # 🌟 核心防丟修正：同步更新儲存狀態與編輯器組件
+                    st.session_state['generated_exam'] = ai_text_result
+                    st.session_state['exam_text_editor'] = ai_text_result # 強行塞進文字框內置狀態
                     st.success("🎉 考卷題目已成功對接生成！已送入下方控制台暫存區。")
                     st.rerun()
                 else: st.error(f"❌ API 出題報錯: {res.text}")
             except Exception as e: st.error(f"❌ 網絡異常: {str(e)}")
 
-# 🧱 模組 5：🆕 應您要求移到正中間的超大題目原始碼暫存區！
+# 🧱 模組 5：題目原始碼暫存區 (高達 600)
 st.write("---")
 st.header("📝 步驟三：題目原始碼暫存區")
 st.caption("💡 提示：你可以直接在這裡隨意修改出題字眼，或貼上之前的舊試卷，重刷網頁字也不會丟失。")
 
-stored_text = st.text_area("💻 試卷原始文本控制台 (橫向已拉滿，高達 600 行寬敞空間)：", value=st.session_state['generated_exam'], height=600, key="exam_editor")
+# 🌟 核心修正：加入強制雙向連動控制，確保 Gemini 生成完後這裡 100% 顯字
+if 'exam_text_editor' not in st.session_state:
+    st.session_state['exam_text_editor'] = st.session_state['generated_exam']
+
+stored_text = st.text_area(
+    "💻 試卷原始文本控制台 (橫向已拉滿，高達 600 行寬敞空間)：", 
+    value=st.session_state['exam_text_editor'], 
+    height=600, 
+    key="exam_text_editor"
+)
+
+# 當用家在 Text Area 裡手動更改了內容，才同步寫回後台儲存
 if stored_text != st.session_state['generated_exam']:
     st.session_state['generated_exam'] = stored_text
+    st.session_state['exam_text_editor'] = stored_text
 
 # 🧱 模組 6：純排版測試按鈕與導出區
 st.write("##")
