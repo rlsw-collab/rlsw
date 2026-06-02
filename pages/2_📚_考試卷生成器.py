@@ -5,6 +5,7 @@ import base64
 import markdown
 import time
 import re
+import os
 from PIL import Image
 import io
 
@@ -13,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 應您要求：升級至 v1.1.1，內容視覺看圖出題版
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.1.1"
+# 🆕 升級至 v1.1.2：導入實體保險箱防丟機制
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.1.2"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -33,12 +34,12 @@ if not st.session_state['authenticated']:
     st.stop()
 
 # ==========================================
-# 主程式
+# 主程式 (解鎖後執行)
 # ==========================================
 st.title(APP_TITLE)
 
 # ==========================================
-# 1. 安全金鑰設定
+# 1. 安全金鑰設定與【實體檔案保險箱機制】
 # ==========================================
 try:
     GITHUB_TOKEN = st.secrets["GIT_TOKEN"]
@@ -48,6 +49,21 @@ try:
 except Exception as e:
     st.error("❌ 未能在 Streamlit Secrets 中找到必要的憑證 (GIT_TOKEN 或 GEMINI_TOKEN)。")
     st.stop()
+
+# 🔒 完美移植默書 APP 的多用戶實體檔案保險箱，防止重刷時 TextBox 被清空
+def get_exam_vault_path():
+    from streamlit.runtime.scriptrunner import get_script_run_ctx
+    ctx = get_script_run_ctx()
+    session_id = ctx.session_id if ctx else "default"
+    return f".tmp_exam_ocr_{session_id}.txt"
+
+def write_to_exam_vault(text):
+    with open(get_exam_vault_path(), "w", encoding="utf-8") as f:
+        f.write(text)
+
+def read_from_exam_vault():
+    path = get_exam_vault_path()
+    return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================
 # 2. 輔助函式：GitHub 與圖片/OCR 處理
@@ -83,7 +99,7 @@ def do_gemini_ocr(b64_list):
             return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
     except:
         pass
-    return "❌ 圖片辨識失敗，請手動輸入範圍。"
+    return "❌ 圖片辨識失敗，請重試或手動輸入。"
 
 # ==========================================
 # 🚀 🚀 Python 終極分數與視覺排版引擎 🚀 🚀
@@ -124,10 +140,13 @@ def process_full_exam(raw_gemini_output):
     return python_layout_engine(raw_gemini_output, is_answer_key=False)
 
 # ==========================================
-# 3. Streamlit 網頁持久化數據狀態機
+# 3. Streamlit 網頁界面與數據控制
 # ==========================================
 if 'generated_exam' not in st.session_state: st.session_state['generated_exam'] = ""
-if 'ocr_box_content' not in st.session_state: st.session_state['ocr_box_content'] = ""
+
+# 讀取實體保險箱當前的數據
+current_vault_ocr = read_from_exam_vault()
+vault_hash = str(len(current_vault_ocr)) + "_" + str(hash(current_vault_ocr))
 
 layout_col1, layout_col2 = st.columns([1, 1])
 
@@ -144,7 +163,6 @@ with layout_col1:
 
     st.write("---")
     st.markdown("🎯 **選擇範圍提供方式：**")
-    # 🆕 精準修訂選項標籤，更貼合您的操作本意
     range_mode = st.radio("範圍模式：", ["提供範圍", "提供作業/工作紙"], horizontal=True)
     
     uploaded_files = st.file_uploader("上傳課本圖片或工作紙 (可多選)", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True)
@@ -162,18 +180,24 @@ with layout_col1:
     
     if range_mode == "提供範圍":
         if uploaded_files and st.button("🔍 點擊執行 Gemini 圖片字元識別 (OCR)"):
-            with st.spinner("正在將圖片文字提取至下方 TextBox..."):
+            with st.spinner("正在將圖片文字提取並寫入實體保險箱..."):
                 b64_list = [convert_image_to_base64(f.getvalue()) for f in uploaded_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
-                st.session_state['ocr_box_content'] = do_gemini_ocr(b64_list)
+                extracted_txt = do_gemini_ocr(b64_list)
+                write_to_exam_vault(extracted_txt) # 🔴 寫入保險箱檔案
+                st.success("✅ 文字解鎖成功！")
                 st.rerun()
         
-        text_input_val = st.text_area("在此修改或輸入考試範圍文字：", value=st.session_state['ocr_box_content'], height=150, key="ocr_text_box")
-        st.session_state['ocr_box_content'] = text_input_val
+        # 綁定實體保險箱
+        text_input_val = st.text_area("在此修改或輸入考試範圍文字：", value=current_vault_ocr, height=150, key=f"ocr_box_{vault_hash}")
+        if text_input_val != current_vault_ocr:
+            write_to_exam_vault(text_input_val)
+            current_vault_ocr = text_input_val
         
     else:
-        # 🆕 作業/工作紙模式：自動鎖定提示，逼 AI 直接看圖理解內容
-        st.session_state['ocr_box_content'] = "根據提供之作業/工作紙"
-        st.text_area("範圍狀態：", value=st.session_state['ocr_box_content'], height=60, disabled=True)
+        # 作業/工作紙模式：自動覆蓋保險箱內容
+        static_notice = "根據提供之作業/工作紙"
+        write_to_exam_vault(static_notice)
+        st.text_area("範圍狀態：", value=static_notice, height=60, disabled=True)
 
     st.write("##")
     package_name = st.text_input("請輸入這個考試包裹的名稱 (選填)")
@@ -186,7 +210,9 @@ with layout_col1:
             with st.spinner("🚀 正在開啟 Gemini 雙向大腦，全面透視內容出題中..."):
                 contents = []
                 
-                # 建立主 Prompt
+                # 重新撈取保險箱內最新、最穩定的文字
+                final_vault_text = read_from_exam_vault()
+                
                 prompt_text = f"""你是一位熟知香港小學課程、傳統名校考卷風格的資深老師。請為【香港小學{grade}】的學生，製作一份【{subject}】科測驗/考試卷。
                 
                 🎯【題型與數量滑桿硬命令】：
@@ -197,11 +223,10 @@ with layout_col1:
                 - 長題目文字題：【{text_count}】題
                 """
                 
-                # 🆕 雙流智慧 Prompt 注入
                 if range_mode == "提供範圍":
-                    prompt_text += f"\n🎯【出題內容命令】：請完全根據用家在 TextBox 提供並修改好的以下文本內容進行出題：\n「{st.session_state['ocr_box_content']}」\n"
+                    prompt_text += f"\n🎯【出題內容命令】：請完全根據用家在 TextBox 提供並修改好的以下繁體教材文字內容進行出題：\n「{final_vault_text}」\n"
                 else:
-                    prompt_text += f"\n🎯【出題內容命令】：用家這次選擇了『提供作業/工作紙』模式。請你【一定要用視覺功能看懂】下方附帶的上傳圖片，全盤理解這些工作紙裡面的題目核心概念、知識考點和題型難度，並根據圖片入面的實質內容出一套相似且全新嘅題目！\n"
+                    prompt_text += f"\n🎯【出題內容命令】：用家這次選擇了『提供作業/工作紙』模式。請你【一定要用視覺功能看懂】下方附帶的上傳圖片，全盤理解這些工作紙/作業裡面的題目核心概念、知識考點和題型難度，並根據圖片入面的實質內容出一套相似且全新嘅題目！\n"
                 
                 prompt_text += """
                 分數格式請一律採用最單純的數字加斜線表示（例如：3/5 或 2 1/4），乘號用 x，除號用 ÷。
@@ -215,7 +240,6 @@ with layout_col1:
                 
                 contents.append(prompt_text)
                 
-                # 將圖片打包進去
                 if uploaded_files:
                     for f in uploaded_files:
                         mime_type = "application/pdf" if f.name.endswith(".pdf") else "image/jpeg"
