@@ -5,17 +5,15 @@ import base64
 import markdown
 import time
 import re
-from PIL import Image
 
 # ==========================================
 # 0. 網頁基本設定與【密碼鎖邏輯】
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 定義統一的標題與版本號碼 (升級至 v1.0.8)
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.0.8"
+# 🆕 升級至 v1.2.0：內容與排版分離調試版
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.2.0"
 
-# 初始化 session_state 來記住登入狀態
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
 
@@ -36,7 +34,7 @@ if not st.session_state['authenticated']:
     st.stop()
 
 # ==========================================
-# 主程式 (只有解鎖後才會執行)
+# 主程式
 # ==========================================
 st.title(APP_TITLE)
 
@@ -49,7 +47,7 @@ try:
     GITHUB_REPO = "rlsw"
     GITHUB_USER = "rlsw-collab"
 except Exception as e:
-    st.error("❌ 未能在 Streamlit Secrets 中找到必要的憑證 (GIT_TOKEN 或 GEMINI_TOKEN)，請先檢查密碼箱。")
+    st.error("❌ 未能在 Streamlit Secrets 中找到必要的憑證 (GIT_TOKEN 或 GEMINI_TOKEN)。")
     st.stop()
 
 # ==========================================
@@ -57,28 +55,13 @@ except Exception as e:
 # ==========================================
 def upload_to_github(path, content, is_bytes=False):
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
-    }
+    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     res = requests.get(url, headers=headers)
     sha = None
-    if res.status_code == 200:
-        sha = res.json().get("sha")
-        
-    if is_bytes:
-        encoded_content = base64.b64encode(content).decode("utf-8")
-    else:
-        encoded_content = base64.b64encode(content.encode("utf-8")).decode("utf-8")
-        
-    data = {
-        "message": f"Upload/Update {path} via Streamlit",
-        "content": encoded_content,
-        "branch": "main"
-    }
-    if sha:
-        data["sha"] = sha
-        
+    if res.status_code == 200: sha = res.json().get("sha")
+    encoded_content = base64.b64encode(content if is_bytes else content.encode("utf-8")).decode("utf-8")
+    data = {"message": f"Upload/Update {path} via Streamlit", "content": encoded_content, "branch": "main"}
+    if sha: data["sha"] = sha
     response = requests.put(url, headers=headers, json=data)
     return response.status_code in [200, 201]
 
@@ -86,31 +69,64 @@ def get_file_from_github(path):
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
     headers = {"Authorization": f"token {GITHUB_TOKEN}"}
     res = requests.get(url, headers=headers)
-    if res.status_code == 200:
-        file_data = res.json()
-        return base64.b64decode(file_data["content"])
-    return None
-
-# 🚀 🚀 核心黑科技：用 Python 自動將傳統的 3/5 或 2 1/4 渲染成漂亮的「真·上下直式分數」
-def convert_to_vertical_fractions(html_content):
-    # 1. 先處理帶分數 格式如: 2 1/4 或 2(1/4) -> 2<span class="frac"><sup>1</sup><sub>4</sub></span>
-    html_content = re.sub(
-        r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?',
-        r'\1<span class="v-frac"><sup>\2</sup><sub>\3</sub></span>',
-        html_content
-    )
-    # 2. 再處理普通分數 格式如: 3/5 -> <span class="v-frac"><sup>3</sup><sub>5</sub></span>
-    # 排除掉網頁標籤入面的斜線 (如 </div> 或 <br/>)
-    html_content = re.sub(
-        r'(?<!/)(?<!<)(?<!\d)(\d+)/(\d+)(?!\d)(?!>)',
-        r'<span class="v-frac"><sup>\1</sup><sub>\2</sub></span>',
-        html_content
-    )
-    return html_content
+    return base64.b64decode(res.json()["content"]) if res.status_code == 200 else None
 
 # ==========================================
-# 3. Streamlit 網頁介面設計
+# 🚀 🚀 Python 核心排版引擎 🚀 🚀
 # ==========================================
+def python_layout_engine(raw_text, is_answer_key=False):
+    lines = raw_text.split('\n')
+    processed_lines = []
+    
+    for line in lines:
+        if not line.strip():
+            continue
+            
+        # 1. 清洗清除 AI 自己亂吐的長底線，避免重疊 Bug
+        line = re.sub(r'_{4,}', '', line)
+        
+        # 2. 處理真·上下直式分數
+        line = re.sub(r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', line)
+        line = re.sub(r'(?<!/)(?<!<)(?<!\d)(\d+)/(\d+)(?!\d)(?!>)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', line)
+        
+        # 3. 選擇題選項 ○ A. ○ B. 強制獨立換行包裹
+        if re.search(r'[○●]\s*[A-D]\.', line):
+            if "●" in line:
+                line = line.replace("●", '<span class="mc-ans">●</span>')
+            processed_lines.append(f'<div class="mc-option">{line}</div>')
+            continue
+
+        # 4. 填充題加短底線
+        if "填空" in line or "填充" in line or re.match(r'^\d+\.', line.strip()) and not re.search(r'[A-D]\.', line) and ("部" not in line) and ("題" not in line):
+            if not is_answer_key and ("分" in line or "厘米" in line or "克" in line or "%" in line or "元" in line or line.strip()[-1] in ["：", ":", "。"]):
+                if "丙部" not in raw_text or "計算" not in line:
+                    line += ' <span class="short-line">______</span>'
+
+        # 5. 計算題或應用題，題目後換行，鋪設 4 條虛線
+        if re.match(r'^\d+\.', line.strip()) and ("丙部" in raw_text or "丁部" in raw_text or "應用題" in line or "計算" in line) and not re.search(r'[A-D]\.', line):
+            processed_lines.append(f'<div class="question-text">{line}</div>')
+            if not is_answer_key:
+                lines_html = '<div class="write-zone">' + '<div class="row-line"></div>'*4 + '</div>'
+                processed_lines.append(lines_html)
+            continue
+            
+        processed_lines.append(f'<div>{line}</div>')
+        
+    return "\n".join(processed_lines)
+
+def process_full_exam(raw_gemini_output):
+    if "---" in raw_gemini_output:
+        parts = raw_gemini_output.split("---")
+        exam_body = python_layout_engine(parts[0], is_answer_key=False)
+        answer_body = python_layout_engine(parts[1], is_answer_key=True)
+        return exam_body + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁 (Answer Key)</h2>' + answer_body
+    else:
+        return python_layout_engine(raw_gemini_output, is_answer_key=False)
+
+# ==========================================
+# 3. Streamlit 網頁介面設計與持久化數據
+# ==========================================
+# 初始化數據存儲，防刷新丟失
 if 'generated_exam' not in st.session_state:
     st.session_state['generated_exam'] = ""
 
@@ -123,179 +139,76 @@ with st.container():
     with col_load2:
         btn_load = st.button("🔍 載入包裹資料", use_container_width=True)
         
-    if btn_load:
-        if load_package_name:
-            config_path = f"exam_packages/{load_package_name}/config.json"
-            config_bytes = get_file_from_github(config_path)
-            if config_bytes:
-                config_data = json.loads(config_bytes.decode("utf-8"))
-                st.success(f"✅ 成功載入包裹：{load_package_name}")
-                st.info(f"原設定科目：{config_data.get('subject')} | 年級：{config_data.get('grade')}")
-            else:
-                st.error("❌ 找不到該名稱的包裹，請檢查拼字。")
+    if btn_load and load_package_name:
+        config_path = f"exam_packages/{load_package_name}/config.json"
+        config_bytes = get_file_from_github(config_path)
+        if config_bytes:
+            config_data = json.loads(config_bytes.decode("utf-8"))
+            st.success(f"✅ 成功載入包裹：{load_package_name}")
 
 st.write("---") 
 
-# --- 基本資料設定 ---
-st.subheader("📋 基本資料設定")
-col1, col2 = st.columns(2)
-with col1:
+# 左邊設定、右邊存放題目緩衝區（中轉站）
+layout_col1, layout_col2 = st.columns([1, 1])
+
+with layout_col1:
+    st.subheader("📋 基本資料與生成題目")
     subject = st.selectbox("選擇科目", ["中文", "英文", "數學", "常識"])
-with col2:
     grade = st.selectbox("選擇年級", ["小一", "小二", "小三", "小四", "小五", "小六"])
-
-# --- 1. 設定考試範圍與縮圖預覽 ---
-st.subheader("🎯 1. 設定考試範圍")
-range_files = st.file_uploader("上傳範圍圖片/文件 (可多選)", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True, key="range")
-
-if range_files:
-    img_files = [f for f in range_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
-    if img_files:
-        st.markdown("📸 **已上傳的範圍圖片預覽：**")
-        cols = st.columns(min(len(img_files), 6))
-        for idx, f in enumerate(img_files):
-            with cols[idx % 6]:
-                try:
-                    img = Image.open(f)
-                    st.image(img, caption=f.name if len(f.name) < 15 else f.name[:12]+"...", use_container_width=True)
-                except:
-                    pass
-
-range_text = st.text_area("微調範圍 (例如：只考第一至三課、加強應用題等)", placeholder="輸入想讓 AI 特別注意的調整...")
-
-# --- 2. 題目類型參考與縮圖預覽 ---
-st.subheader("📝 2. 題目類型參考")
-style_files = st.file_uploader("上傳工作紙/作業參考 (可多選)", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True, key="style")
-
-if style_files:
-    style_img_files = [f for f in style_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
-    if style_img_files:
-        st.markdown("📸 **已上傳的題型參考圖片預覽：**")
-        cols_style = st.columns(min(len(style_img_files), 6))
-        for idx, f in enumerate(style_img_files):
-            with cols_style[idx % 6]:
-                try:
-                    img = Image.open(f)
-                    st.image(img, caption=f.name if len(f.name) < 15 else f.name[:12]+"...", use_container_width=True)
-                except:
-                    pass
-
-# --- 3. 打包與儲存設定 ---
-st.subheader("💾 3. 打包與儲存設定 (GitHub)")
-package_name = st.text_input("請輸入這個考試包裹的名稱", placeholder="同名將會覆蓋/更新 GitHub 上的舊資料")
-
-if st.button("📦 儲存並打包資料到 GitHub"):
-    if not package_name:
-        st.error("❌ 請先輸入包裹名稱才能進行打包儲存！")
-    else:
-        with st.spinner("正在將文件上傳至 GitHub 倉庫..."):
-            base_path = f"exam_packages/{package_name}"
-            config_info = {"subject": subject, "grade": grade, "range_text": range_text}
-            upload_to_github(f"{base_path}/config.json", json.dumps(config_info, ensure_ascii=False, indent=4))
-            st.success(f"🎉 打包成功！所有資料已 safe 儲存。")
-
-# ==========================================
-# 4. 核心功能：【智慧自動重試】直連 2.5 Flash
-# ==========================================
-st.subheader("✨ 4. 生成測驗/考試卷")
-if st.button("🚀 開始利用 Gemini AI 製作試卷"):
-    with st.spinner("🚀 智能排版大腦正在為您構思香港小學風格試卷，請稍候..."):
-        
-        # 建立簡化、方便 Python 在前端攔截與轉化直式分數的 Prompt
-        prompt_text = f"""你是一位熟知香港小學課程、傳統名校考卷風格與考試制度的資深小學老師。
-請為【香港小學{grade}】的學生，製作一份符合教育局課程指引且難易度適中的【{subject}】科測驗/考試卷。
-
-根據香港小學的真實排版要求，出的題型必須符合以下【全新修訂版：答題線與排版命令】：
-
-⚠️【1. 數學分數與符號格式命令】：
-- 🚫 絕對禁止使用任何 LaTeX 數學格式，禁止出現任何 `$` 符號、`\\frac` 等學術程式碼。
-- 🗣️ 為了方便後台處理，分數請直接用最簡單的純文字格式輸出：
-  * 普通分數格式：分子/分母，例如：3/5、13/3。
-  * 帶分數格式：整數 空格 分子/分母，例如：2 1/4、5 1/4。
-  * 乘號請用「x」，除號請用「÷」。
-
-⚠️【2. 填充題與計算題的答題線縮短 2/3 命令】：
-- 【填充題】：空格答題線請統一縮減為 6 個底線 `______`。
-- 【計算題 / 簡答題】：每道計算題下面請空出適當的手寫白位，並在題目的正下方或右側尾端提供一條和填充題一樣長度的短答案線 `______` 供填寫最終答案。
-
-⚠️【3. 多項選擇題 (MC) 命令】：
-- 題目自成一行。
-- A、B、C、D 四個選項必須在問題的下方，且每一個選項必須獨立換行！
-- 每個選項前加上一個空心圓圈 `○`。在每個選項的結尾，請加上 `<br>` 標籤。
-
-⚠️【4. 列式計算應用題 - 換行與答題橫線命令】：
-- 應用題題目文字結束後，必須立刻強制換行。
-- 【第一條答題線】必須直接出現在題目的正下方！
-- 題目下方不需要出現「列式：」和「答：」等文字，請直接提供 4 條長長的空白橫線。
-  格式規範（題目下一行立刻開始）：
-  ______________________________________________________<br>
-  ______________________________________________________<br>
-  ______________________________________________________<br>
-  ______________________________________________________<br>
-
-⚠️【5. 題型分流限制】：
-- 🚫【找錯處 (Proofreading)】題型：這是【英文】科的專屬題型！當前科目是【{subject}】。如果目前不是英文科，絕對不要生成任何找錯處題型！
-
-【試卷整體結構要求】：
-試卷必須嚴格分為【試卷正文】與【答案頁 (Answer Key)】，中間使用 `---` 分割線分開。
-"""
-        if range_text:
-            prompt_text += f"\n【使用者特別指定的微調範圍與重點】：\n{range_text}\n"
+    range_text = st.text_area("微調範圍", placeholder="輸入調整需求...")
+    package_name = st.text_input("請輸入這個考試包裹的名稱")
+    
+    # 🆕 按鈕一：純出卷（只聯絡 Gemini，拿到純文字內容）
+    if st.button("🤖 步驟一：呼叫 Gemini AI 生成新題目", use_container_width=True):
+        with st.spinner("正在向 Gemini 索取題目原始碼..."):
+            prompt_text = f"""你是一位熟知香港小學課程、傳統名校考卷風格的資深老師。請為【香港小學{grade}】的學生，製作一份【{subject}】科測驗/考試卷。
+出的題型必須豐富多樣（包括多項選擇題、填充題、計算題、應用題等）。
+分數格式：分子/分母 (e.g. 3/5) 或 帶分數整數 空格 分子/分母 (e.g. 2 1/4)，乘號 x，除號 ÷。
+選擇題格式：
+1. 問題文字
+○ A. 選項一
+○ B. 選項二
+○ C. 選項三
+○ D. 選項四
+試卷與答案頁中間使用 `---` 分割。"""
+            if range_text: prompt_text += f"\n【範圍】：\n{range_text}\n"
             
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
-        headers = {"Content-Type": "application/json"}
-        payload = {"contents": [{"parts": [{"text": prompt_text}]}]}
-        
-        max_retries = 3
-        success = False
-        
-        for attempt in range(max_retries):
+            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
             try:
-                res = requests.post(api_url, headers=headers, json=payload)
+                res = requests.post(api_url, headers={"Content-Type": "application/json"}, json={"contents": [{"parts": [{"text": prompt_text}]}]})
                 if res.status_code == 200:
-                    res_json = res.json()
-                    ai_result = res_json['candidates'][0]['content']['parts'][0]['text']
-                    st.session_state['generated_exam'] = ai_result
-                    success = True
-                    break
-                elif res.status_code == 503 and attempt < max_retries - 1:
-                    st.warning(f"⚠️ 伺服器目前較為繁忙（503），正在進行第 {attempt + 1} 次自動重新連線...")
-                    time.sleep(3)
-                else:
-                    st.error(f"❌ Gemini 2.5 Flash 伺服器拒絕請求 (錯誤代碼 {res.status_code}): {res.text}")
-                    break
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    time.sleep(3)
-                else:
-                    st.error(f"❌ 聯絡 Gemini 伺服器失敗: {str(e)}")
-                    break
-                    
-        if success:
-            st.rerun()
+                    st.session_state['generated_exam'] = res.json()['candidates'][0]['content']['parts'][0]['text']
+                    st.success("🤖 題目生成完畢！已送入右側暫存區。")
+                    st.rerun()
+                else: st.error(f"❌ API 報錯: {res.text}")
+            except Exception as e: st.error(f"❌ 失敗: {str(e)}")
 
-# --- 試卷預覽與打印 ---
+with layout_col2:
+    st.subheader("📝 題目原始碼暫存區")
+    st.caption("💡 提示：你可以直接在這裡修改文字，或貼上之前的舊試卷，再點擊下方「排版渲染」進行測試。")
+    # 🆕 密技中轉站：利用 Text Area 持久化保存文字，允許用家手動改字或黏貼
+    stored_text = st.text_area("試卷原始文本控制台", value=st.session_state['generated_exam'], height=290, key="exam_editor")
+    if stored_text != st.session_state['generated_exam']:
+        st.session_state['generated_exam'] = stored_text
+
+# 🆕 按鈕二：純排版（完全不花 API Key 錢，100% 用 Python 本地渲染最新的 CSS 視覺外觀）
+st.write("---")
+st.subheader("🎨 視覺排版測試與導出")
+btn_render = st.button("🎨 步驟二：執行 Python 引擎，更新試卷排版 🔄", type="primary", use_container_width=True)
+
+# --- 試卷預覽與打印區塊 ---
 if st.session_state['generated_exam']:
-    st.success("🎉 試卷與答案生成成功！")
-    tab1, tab2 = st.tabs(["📺 網頁預覽與導出儲存", "🖨️ 專業打印預覽"])
+    tab1, tab2 = st.tabs(["📺 網頁完美預覽", "🖨️ 專業打印預覽 (支援直式分數)"])
     
-    # 進行 Python 的「直式分數過濾轉化」
-    raw_markdown_content = st.session_state['generated_exam']
-    html_raw_content = markdown.markdown(raw_markdown_content)
-    
-    # 🚀 在前端透過 Python Regex 暴力轉化真·直式分數
-    perfect_html_content = convert_to_vertical_fractions(html_raw_content)
+    # 呼叫 Python 終極排版引擎進行視覺加工
+    perfect_html_content = process_full_exam(st.session_state['generated_exam'])
     
     with tab1:
-        # 在前端完美渲染
-        st.markdown(perfect_html_content, unsafe_allow_html=True)
-        st.write("---")
+        st.markdown(f'<div id="preview-box">{perfect_html_content}</div>', unsafe_allow_html=True)
         if st.button("📝 儲存試卷文本 (exam.md) 到 GitHub"):
-            if not package_name:
-                st.error("❌ 請先輸入包裹名稱！")
+            if not package_name: st.error("❌ 請先輸入包裹名稱！")
             else:
-                exam_path = f"exam_packages/{package_name}/exam.md"
-                if upload_to_github(exam_path, st.session_state['generated_exam']):
+                if upload_to_github(f"exam_packages/{package_name}/exam.md", st.session_state['generated_exam']):
                     st.success(f"✅ 試卷成功儲存至 GitHub！")
                     
     with tab2:
@@ -305,42 +218,50 @@ if st.session_state['generated_exam']:
         <head>
         <meta charset="utf-8">
         <style>
-            .print-control-bar {{ background-color: #f0f2f6; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-family: sans-serif; }}
+            .print-control-bar {{ background-color: #f0f2f6; padding: 15px; border-radius: 8px; margin-bottom: 20px; }}
             .print-btn {{ background-color: #ff4b4b; color: white; border: none; padding: 10px 20px; font-size: 16px; font-weight: bold; border-radius: 5px; cursor: pointer; }}
-            #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", Arial, sans-serif; line-height: 2.2; color: #000000; padding: 10px; font-size: 16px; }}
-            
+            #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; color: #000000; padding: 30px; font-size: 16px; line-height: 2.2; }}
             #exam-body p {{ margin-bottom: 16px; }}
             
-            /* 🚀 頂級直式分數 CSS：分子在上，一條橫劃線，分母在下 */
+            /* 🚀 1. 直式分數 CSS */
             .v-frac {{
                 display: inline-flex;
                 flex-direction: column;
                 vertical-align: middle;
                 text-align: center;
-                line-height: 1.0;
+                line-height: 1.1;
                 padding: 0 4px;
-                font-size: 0.85em;
+                font-size: 0.8em;
+                position: relative;
+                top: -2px;
             }}
-            .v-frac sup {{
-                border-bottom: 1.5px solid #000; /* 中間精美的一劃分數線 */
-                padding-bottom: 2px;
-                vertical-align: baseline;
-                position: static;
-            }}
-            .v-frac sub {{
-                padding-top: 2px;
-                vertical-align: baseline;
-                position: static;
-            }}
+            .v-frac .num {{ border-bottom: 1.5px solid #000; padding-bottom: 1px; }}
+            .v-frac .den {{ padding-top: 1px; }}
+            
+            /* 🚀 2. 選擇題強制換行排版 */
+            .mc-option {{ margin-left: 20px; margin-top: 6px; margin-bottom: 6px; display: block !important; }}
+            .mc-ans {{ color: #ff4b4b; font-weight: bold; }}
+            
+            /* 🚀 3. 填充題短底線 */
+            .short-line {{ font-weight: bold; text-decoration: underline; color: #000; }}
+            
+            /* 🚀 4. 計算題與應用題：全寬虛線 */
+            .question-text {{ font-weight: bold; margin-top: 20px; margin-bottom: 10px; }}
+            .write-zone {{ margin-top: 12px; margin-bottom: 25px; width: 100%; }}
+            .row-line {{ width: 100%; height: 38px; border-bottom: 1px dashed #999; }}
+            
+            .page-break {{ page-break-before: always; }}
+            .ans-header {{ color: #ff4b4b; border-bottom: 2px solid #ff4b4b; padding-bottom: 10px; }}
+            @media print {{ .print-control-bar {{ display: none; }} body {{ background-color: white; }} }}
         </style>
         </head>
         <body>
             <div class="print-control-bar">
-                <button class="print-btn" onclick="window.print()">🖨️ 立即打印 / 匯出 PDF</button>
+                <button class="print-btn" onclick="window.print()">🖨️ 立即打印 / 匯出 PDF 考卷</button>
             </div>
             <div id="exam-body">{perfect_html_content}</div>
         </body>
         </html>
         """
         import streamlit.components.v1 as components
-        components.html(html_for_printing, height=900, scrolling=True)
+        components.html(html_for_printing, height=1000, scrolling=True)
