@@ -5,6 +5,7 @@ import base64
 import time
 import re
 import os
+import datetime
 from PIL import Image
 import io
 
@@ -13,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.5.2：密鑰正名優化版 (正名 OPENAI_TOKEN ＆ 拔除 DeepSeek)
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.5.2"
+# 🆕 升級 v1.5.5：純免費特攻版 (Google 3路鏈條 + GitHub 綠色通道 GPT-4o 聯手，0成本封頂)
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.5.5"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -72,12 +73,9 @@ st.markdown("""
 try:
     GITHUB_TOKEN = st.secrets["GIT_TOKEN"]
     GEMINI_TOKEN = st.secrets["GEMINI_TOKEN"]
-    GITHUB_REPO = "rlsw"
-    GITHUB_USER = "rlsw-collab"
-    
-    # 🆕 正式改用用家指定的 OPENAI_TOKEN 變數名
-    OPENAI_TOKEN = st.secrets.get("OPENAI_TOKEN", "")
-    CLAUDE_TOKEN = st.secrets.get("CLAUDE_TOKEN", "")
+    AI_TOKEN = st.secrets.get("AI_TOKEN", "") # 默書工具用的 GitHub Key 做綠色通道
+    GH_REPO = "rlsw"
+    GH_USER = "rlsw-collab"
 except Exception as e:
     st.error("❌ 未能在 Streamlit Secrets 中找到必要的基礎憑證 (GIT_TOKEN 或 GEMINI_TOKEN)。")
     st.stop()
@@ -97,95 +95,122 @@ def read_from_exam_vault():
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================
-# 🛡️ 智慧多模型降級重試 ＆ 錯誤診斷引擎 (優化精簡版)
+# 🛡️ GitHub 雲端實時計數同步邏輯 (防衝突)
 # ==========================================
-def call_multiverse_ai_with_diagnostics(payload_template, text_prompt):
+def get_hkt_date_str():
+    tz_hkt = datetime.timezone(datetime.timedelta(hours=8))
+    return datetime.datetime.now(tz_hkt).strftime("%Y-%m-%d")
+
+def increment_github_counter(counter_type):
     """
-    大聯盟精簡鏈條：Gemini -> OpenAI (GPT-4o) -> Claude 3.5
+    counter_type: "main" (主攻) 或 "backup" (後備)
     """
-    diagnostics = {
-        "Google Gemini": "未測試",
-        "OpenAI (ChatGPT)": "未測試",
-        "Anthropic (Claude)": "未測試"
+    path = "usage_counter.json"
+    url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/{path}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
     }
-
-    # 1. 第一階段：Gemini 原生鏈條
-    gemini_models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash"]
-    gemini_errors = []
     
-    if not GEMINI_TOKEN:
-        diagnostics["Google Gemini"] = "❌ 密碼箱未配妥 GEMINI_TOKEN 變數"
-    else:
-        for g_model in gemini_models:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={GEMINI_TOKEN}"
-            try:
-                res = requests.post(url, headers={"Content-Type": "application/json"}, json=payload_template, timeout=60)
-                if res.status_code == 200:
-                    raw = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
-                    st.toast(f"🤖 成功調用 Google 通道：{g_model}", icon="✅")
-                    return json.loads(raw), g_model, None
-                else:
-                    gemini_errors.append(f"[{g_model}] 狀態碼 {res.status_code}: {res.text[:120]}")
-            except Exception as e:
-                gemini_errors.append(f"[{g_model}] 連線異常: {str(e)[:80]}")
-            st.toast(f"⚠️ Google {g_model} 無法使用，切換中...", icon="🔄")
-        diagnostics["Google Gemini"] = " | ".join(gemini_errors)
-
-    # 2. 第二階段：OpenAI GPT-4o 通道 (使用全新的 OPENAI_TOKEN)
-    if not OPENAI_TOKEN:
-        diagnostics["OpenAI (ChatGPT)"] = "❌ 密碼箱未配妥 OPENAI_TOKEN 變數"
-    else:
-        st.toast("🚀 正在啟動第二防禦線：OpenAI GPT-4o 通道...", icon="⚡")
-        url = "https://api.openai.com/v1/chat/completions"
-        headers = {"Authorization": f"Bearer {OPENAI_TOKEN}", "Content-Type": "application/json"}
-        openai_payload = {
-            "model": "gpt-4o",
-            "response_format": {"type": "json_object"},
-            "messages": [{"role": "user", "content": text_prompt}]
-        }
+    today_str = get_hkt_date_str()
+    default_counter = {
+        "last_reset_date": today_str,
+        "exam_tool": {"main": 0, "backup": 0},
+        "dictation_tool": {"main": 0, "backup": 0}
+    }
+    
+    for attempt in range(3):
         try:
-            res = requests.post(url, headers=headers, json=openai_payload, timeout=60)
+            res = requests.get(url, headers=headers)
             if res.status_code == 200:
-                raw = res.json()['choices'][0]['message']['content'].strip()
-                st.toast("🤖 成功調用 OpenAI 通道：GPT-4o", icon="✅")
-                return json.loads(raw), "gpt-4o", None
+                data = res.json()
+                content = base64.b64decode(data["content"]).decode("utf-8")
+                counter = json.loads(content)
+                sha = data["sha"]
             else:
-                diagnostics["OpenAI (ChatGPT)"] = f"❌ 狀態碼 {res.status_code}: {res.text[:200]}"
-        except Exception as e:
-            diagnostics["OpenAI (ChatGPT)"] = f"❌ 連線異常: {str(e)}"
-        st.toast("⚠️ OpenAI 通道失敗，切換中...", icon="🔄")
+                counter = default_counter
+                sha = None
+                
+            if counter.get("last_reset_date") != today_str:
+                counter["last_reset_date"] = today_str
+                counter["exam_tool"] = {"main": 0, "backup": 0}
+                counter["dictation_tool"] = {"main": 0, "backup": 0}
+                
+            counter["exam_tool"][counter_type] += 1
+            
+            content_str = json.dumps(counter, indent=2)
+            content_b64 = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
+            payload = {
+                "message": f"Increment exam {counter_type} counter [skip ci]",
+                "content": content_b64
+            }
+            if sha:
+                payload["sha"] = sha
+                
+            put_res = requests.put(url, headers=headers, json=payload)
+            if put_res.status_code in [200, 201]:
+                st.toast(f"📊 試卷雲端配額同步成功！今日已用「{counter_type}」：{counter['exam_tool'][counter_type]} 次", icon="📝")
+                break
+            time.sleep(0.5)
+        except:
+            time.sleep(0.5)
 
-    # 3. 第三階段：Anthropic Claude 3.5 Sonnet 通道
-    if not CLAUDE_TOKEN:
-        diagnostics["Anthropic (Claude)"] = "❌ 密碼箱未配妥 CLAUDE_TOKEN 變數"
-    else:
-        st.toast("🚀 正在啟動終極防禦線：Claude 3.5...", icon="⚡")
-        url = "https://api.anthropic.com/v1/messages"
+# ==========================================
+# 🛡️ 智慧全免費失敗故障輪替鏈 (Google 3路 + GitHub 綠色通道)
+# ==========================================
+def call_pure_free_multiverse_ai(payload_template, text_prompt):
+    """
+    大腦順序：Gemini 2.5 Flash (主攻) -> Gemini 2.5 Pro (後備) -> Gemini 3 Flash (後備) -> GitHub 綠色通道 GPT-4o (終極保險)
+    """
+    # 1. 第一階段：Google 三路免費通道
+    gemini_models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash"]
+    
+    for g_model in gemini_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={GEMINI_TOKEN}"
+        try:
+            res = requests.post(url, headers={"Content-Type": "application/json"}, json=payload_template, timeout=60)
+            if res.status_code == 200:
+                raw_text = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+                # 累加計數
+                c_type = "main" if g_model == "gemini-2.5-flash" else "backup"
+                increment_github_counter(c_type)
+                return json.loads(raw_text), g_model
+        except:
+            pass
+        st.toast(f"⚠️ Google {g_model} 免費通道配額耗盡，無感切換中...", icon="🔄")
+
+    # 2. 第二階段：GitHub Green 通道自由開闢 (GPT-4o 護航)
+    if AI_TOKEN:
+        st.toast("🚀 正在啟動終極防禦線：GitHub 綠色通道 GPT-4o...", icon="⚡")
+        # 呼叫 GitHub Models API 接口
+        url = "https://models.inference.ai.azure.com/chat/completions"
         headers = {
-            "x-api-key": CLAUDE_TOKEN,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
+            "Authorization": f"Bearer {AI_TOKEN}",
+            "Content-Type": "application/json"
         }
-        claude_prompt = text_prompt + "\n直接輸出純 JSON 字串，不要包含 markdown 標籤。"
-        claude_payload = {
-            "model": "claude-3-5-sonnet-20241022",
-            "max_tokens": 4000,
-            "messages": [{"role": "user", "content": claude_prompt}]
+        github_payload = {
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "system", "content": "You are a professional JSON output assistant. You must return a strict JSON object with fields 'exam_body' and 'answer_body' without any markdown block formatting."},
+                {"role": "user", "content": text_prompt}
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.3
         }
         try:
-            res = requests.post(url, headers=headers, json=claude_payload, timeout=75)
+            res = requests.post(url, headers=headers, json=github_payload, timeout=75)
             if res.status_code == 200:
-                raw = res.json()['content'][0]['text'].strip()
-                raw = re.sub(r'^```json\s*', '', raw)
-                raw = re.sub(r'\s*```$', '', raw).strip()
-                st.toast("🤖 成功調用 Anthropic 通道：Claude 3.5", icon="✅")
-                return json.loads(raw), "claude-3.5-sonnet", None
-            else:
-                diagnostics["Anthropic (Claude)"] = f"❌ 狀態碼 {res.status_code}: {res.text[:200]}"
-        except Exception as e:
-            diagnostics["Anthropic (Claude)"] = f"❌ 連線異常: {str(e)}"
+                raw_content = res.json()['choices'][0]['message']['content'].strip()
+                # 預防性清除 markdown 符號
+                raw_content = re.sub(r'^```json\s*', '', raw_content)
+                raw_content = re.sub(r'\s*```$', '', raw_content).strip()
+                # 併入後備計數器統計中
+                increment_github_counter("backup")
+                return json.loads(raw_content), "github-gpt-4o"
+        except:
+            pass
 
-    return None, None, diagnostics
+    return None, None
 
 # ==========================================
 # 2. 輔助函式：圖片處理 & OCR 保底
@@ -215,7 +240,7 @@ def do_gemini_ocr_with_fallback(b64_list, gemini_token):
                 return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
         except:
             continue
-    return "❌ 圖片辨識失敗，所有 Google 備用通道均超時，請稍候重試或手動輸入。"
+    return "❌ 圖片辨識失敗，所有 Google 免費通道均超時，請稍候重試或手動輸入。"
 
 # ==========================================
 # 🚀 🚀 Python 終極分數與視覺排版引擎 🚀 🚀
@@ -339,13 +364,14 @@ else:
     st.text_area("📝 範圍狀態（已鎖定）：", value=static_notice, height=70, disabled=True)
 
 st.write("##")
-btn_call_ai = st.button("🚀 呼叫大聯盟 AI 多通道生成新題目 🤖", type="secondary", use_container_width=True)
+# 🚀 完美正名：移除大聯盟相關詞彙
+btn_call_ai = st.button("🚀 呼叫 AI 免費多通道生成新題目 🤖", type="secondary", use_container_width=True)
 
 if btn_call_ai:
     if mc_count == 0 and fill_count == 0 and calc_count == 0 and text_count == 0:
         st.error("❌ 請至少將一項題型的滑桿調大於 0！")
     else:
-        with st.spinner("🚀 正在啟用多廠商高可用模型鏈，並行破防出題中..."):
+        with st.spinner("🚀 正在連動多路純免費大腦鏈條，全力出題中..."):
             contents = []
             final_vault_text = read_from_exam_vault()
             mc_instruction = f"必須剛好生成【{mc_count}】題。" if mc_count > 0 else "不要出 any 多項選擇題，甲部留空。"
@@ -382,8 +408,8 @@ if btn_call_ai:
                 }
             }
             
-            # 🌟 調用全新密鑰修正後的診斷引擎
-            parsed_json, used_model, diag_report = call_multiverse_ai_with_diagnostics(payload_template, text_prompt)
+            # 🌟 啟動 Google 免費鏈條 + GitHub 綠色通道聯手引擎
+            parsed_json, used_model = call_pure_free_multiverse_ai(payload_template, text_prompt)
             
             try:
                 if parsed_json and "exam_body" in parsed_json:
@@ -393,15 +419,12 @@ if btn_call_ai:
                     st.session_state['generated_answers'] = ans_body
                     st.session_state['exam_text_editor'] = ex_body
                     st.session_state['ans_text_editor'] = ans_body
-                    st.success(f"🎉 試卷大聯盟生成成功！(最終調用功臣通道: {used_model})")
+                    st.success(f"🎉 試卷純免費通道生成成功！(最終調用功臣大腦: {used_model})")
                     st.rerun()
                 else:
-                    st.error("❌ 全線 AI 通道均不可用！下方已為您抓取各家廠商底層原裝 Error Code 以供檢查：")
-                    for provider, err_msg in diag_report.items():
-                        st.markdown(f"**🧱 {provider} 通道診斷結果：**")
-                        st.code(err_msg, language="json")
+                    st.error("❌ 全線 AI 純免費通道（Google 3路 ＆ GitHub 綠色通道）今日配額均已用盡！請等候 Reset 重置後再試。")
             except Exception as e: 
-                st.error(f"❌ 解析大聯盟數據結構失敗。原因: {str(e)}")
+                st.error(f"❌ 解析免費數據結構失敗。原因: {str(e)}")
 
 # ==========================================
 # 3. 獨立原始碼控制台 (雙區獨立)
