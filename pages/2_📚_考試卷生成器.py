@@ -13,8 +13,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 安全加固升級 v1.4.1：加入字面 \n 萬能清洗過濾器，徹底消滅排版換行崩潰 Bug
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.4.1"
+# 🆕 全新升級 v1.4.3：部署中文分數智慧編譯引擎 (5又6分之1 自動完美編譯)
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.4.3"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -36,6 +36,38 @@ if not st.session_state['authenticated']:
 # 主程式 (解鎖後執行)
 # ==========================================
 st.title(APP_TITLE)
+
+# 注入母網頁的 @media print 打印樣式，確保列印時 Streamlit 控制項 100% 被隱藏，僅顯示試卷
+st.markdown("""
+<style>
+@media print {
+    /* 隱藏所有 Streamlit 的原生控制 UI 元件 */
+    div[data-testid="stSidebar"],
+    header[data-testid="stHeader"],
+    footer,
+    div[data-testid="stToolbar"],
+    .stButton, .stSlider, .stRadio, .stSelectbox, .stTextArea, .stFileUploader,
+    h1, h2, h3, h4, h5, h6, p, span, hr, .stMarkdown {
+        display: none !important;
+    }
+    
+    /* 強制 Iframe 作為唯一列印主體，滿頁覆蓋 */
+    iframe {
+        display: block !important;
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        height: 100% !important;
+        border: none !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        z-index: 9999999 !important;
+        background-color: white !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ==========================================
 # 1. 安全金鑰設定與【實體檔案保險箱機制】
@@ -150,12 +182,36 @@ def convert_to_vertical_fractions(text_content):
     text_content = re.sub(r'(?<!\d)38(?!\d|\.)', '3/8', text_content)
     text_content = re.sub(r'(?<!\d)12(?!\d|\.)', '1/2', text_content)
 
+    # 🌟 智慧中文字分數編譯引擎 🌟
+    # (a) 編譯「X又Y分之Z」（例如：5又6分之1 -> 5 [1/6]）
+    # 注意：在中文語境中，Y分之Z 代表分母是Y，分子是Z
+    text_content = re.sub(
+        r'(\d+)\s*又\s*(\d+)\s*分之\s*(\d+)',
+        r'\1<span class="v-frac"><span class="num">\3</span><span class="den">\2</span></span>',
+        text_content
+    )
+    
+    # (b) 編譯「X又Y/Z」（例如：5又1/6 -> 5 [1/6]）
+    text_content = re.sub(
+        r'(\d+)\s*又\s*(\d+)/(\d+)',
+        r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>',
+        text_content
+    )
+    
+    # (c) 編譯普通「Y分之Z」（例如：6分之1 -> [1/6]）
+    text_content = re.sub(
+        r'(?<!\d)(\d+)\s*分之\s*(\d+)(?!\d)',
+        r'<span class="v-frac"><span class="num">\2</span><span class="den">\1</span></span>',
+        text_content
+    )
+
+    # 處理標準常規分數與帶分數
     text_content = re.sub(r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
     text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)(\d+)/(\d+)(?!\d)(?!>)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
     return text_content
 
 def python_layout_engine(raw_text, is_answer_key=False):
-    # 🌟 核心修復一：萬能清洗器，將字面字串 "\\n" 同 "\\\\n" 徹底還原成系統真正嘅斷行符 "\n"
+    # 萬能清洗器，將字面字串 "\\n" 同 "\\\\n" 徹底還原成系統真正嘅斷行符 "\n"
     if raw_text:
         raw_text = raw_text.replace("\\n", "\n").replace("\\\\n", "\n")
         
@@ -308,7 +364,7 @@ if btn_call_ai:
                             },
                             "answer_body": {
                                 "type": "STRING",
-                                "description": "答案頁。必須對應上述出好的題目，一題不漏地提供詳細計算步驟和最終正確答案。"
+                                "description": "答案頁。必須對應上述出好的題目，一題不漏地提供詳細計算步驟 and 最終正確答案。"
                             }
                         },
                         "required": ["exam_body", "answer_body"]
@@ -329,7 +385,6 @@ if btn_call_ai:
                     raw_ai_output = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
                     parsed_json = json.loads(raw_ai_output)
                     
-                    # 🌟 核心修復二：接收端同時進行 "\\n" 自動清洗，雙重鎖死
                     ex_body = parsed_json.get("exam_body", "").replace("\\n", "\n").replace("\\\\n", "\n")
                     ans_body = parsed_json.get("answer_body", "").replace("\\n", "\n").replace("\\\\n", "\n")
                     
@@ -382,28 +437,47 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
     
     html_for_printing = f"""
     <!DOCTYPE html>
-    <html>
+    <html style="background-color: white !important; color: black !important; color-scheme: light !important;">
     <head>
     <meta charset="utf-8">
+    <meta name="color-scheme" content="light">
     <style>
-        #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; color: #000000; padding: 20px; font-size: 16px; line-height: 2.3; }}
+        /* 強制亮色模式以阻止 iPad 瀏覽器深色反轉 */
+        :root {{
+            color-scheme: light !important;
+        }}
+        html, body {{
+            background-color: white !important;
+            color: #000000 !important;
+            -webkit-text-fill-color: #000000 !important; /* iOS 文字強指定黑色 */
+        }}
+        
+        #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; color: #000000 !important; padding: 20px; font-size: 16px; line-height: 2.3; }}
         #exam-body p {{ margin-bottom: 16px; }}
-        .exam-title-main {{ font-size: 26px !important; font-weight: 800 !important; text-align: center !important; margin-top: 25px !important; margin-bottom: 15px !important; letter-spacing: 2px; }}
-        .exam-user-info {{ font-size: 18px !important; font-weight: bold !important; text-align: center !important; margin-bottom: 35px !important; word-spacing: 15px; }}
-        .exam-section-header {{ font-size: 20px !important; font-weight: 800 !important; color: #000000 !important; margin-top: 30px !important; margin-bottom: 12px !important; border-left: 5px solid #000; padding-left: 10px; }}
+        .exam-title-main {{ font-size: 26px !important; font-weight: 800 !important; text-align: center !important; margin-top: 25px !important; margin-bottom: 15px !important; letter-spacing: 2px; color: #000000 !important; }}
+        .exam-user-info {{ font-size: 18px !important; font-weight: bold !important; text-align: center !important; margin-bottom: 35px !important; word-spacing: 15px; color: #000000 !important; }}
+        .exam-section-header {{ font-size: 20px !important; font-weight: 800 !important; color: #000000 !important; margin-top: 30px !important; margin-bottom: 12px !important; border-left: 5px solid #000 !important; padding-left: 10px; }}
         .v-frac {{ display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; line-height: 1.0; padding: 0 4px; font-size: 0.85em; position: relative; top: -0.15em; }}
         .v-frac .num {{ border-bottom: 1.5px solid #000000; padding-bottom: 2px; min-width: 14px; font-weight: 600; }}
         .v-frac .den {{ padding-top: 2px; min-width: 14px; font-weight: 600; }}
-        .mc-option {{ margin-left: 20px; margin-top: 8px; margin-bottom: 8px; display: block !important; clear: both; }}
-        .mc-ans {{ color: #ff4b4b; font-weight: bold; }}
-        .short-line {{ font-weight: bold; text-decoration: underline; color: #000; }}
-        .question-text {{ font-weight: bold; margin-top: 25px; margin-bottom: 12px; }}
-        .fill-blank-row {{ margin-top: 14px; margin-bottom: 14px; }}
+        .mc-option {{ margin-left: 20px; margin-top: 8px; margin-bottom: 8px; display: block !important; clear: both; color: #000000 !important; }}
+        .mc-ans {{ color: #ff4b4b !important; font-weight: bold; }}
+        .short-line {{ font-weight: bold; text-decoration: underline; color: #000000 !important; }}
+        .question-text {{ font-weight: bold; margin-top: 25px; margin-bottom: 12px; color: #000000 !important; }}
+        .fill-blank-row {{ margin-top: 14px; margin-bottom: 14px; color: #000000 !important; }}
         .write-zone {{ margin-top: 12px; margin-bottom: 25px; width: 100%; }}
-        .row-line {{ width: 100%; height: 38px; border-bottom: 1px dashed #999; }}
+        .row-line {{ width: 100%; height: 38px; border-bottom: 1px dashed #999 !important; }}
         .page-break {{ page-break-before: always; }}
-        .ans-header {{ color: #ff4b4b; border-bottom: 2px solid #ff4b4b; padding-bottom: 10px; margin-top: 35px; font-size: 24px; text-align: center; }}
-        @media print {{ body {{ background-color: white; }} }}
+        .ans-header {{ color: #ff4b4b !important; border-bottom: 2px solid #ff4b4b !important; padding-bottom: 10px; margin-top: 35px; font-size: 24px; text-align: center; }}
+        
+        @media print {{ 
+            html, body {{
+                background-color: white !important;
+                color: #000000 !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }}
+        }}
     </style>
     </head>
     <body>
