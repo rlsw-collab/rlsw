@@ -14,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 全新里程碑升級 v1.3.2：雙TextBox獨立區塊 + 徹底校正答題線與副題目 + 防格式損毀
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.3.2"
+# 🆕 全新升級 v1.3.3：動態注入題型數量(支援0條) + 徹底解決雙控制台變空白 Bug
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.3.3"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -123,21 +123,21 @@ def convert_to_vertical_fractions(text_content):
     text_content = re.sub(r'(?<!\d)38(?!\d|\.)', '3/8', text_content)
     text_content = re.sub(r'(?<!\d)12(?!\d|\.)', '1/2', text_content)
 
-    # 渲染帶分數（支援帶括號的分數，如 3(2/5)）
+    # 渲染帶分數
     text_content = re.sub(r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
     # 渲染普通分數
     text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)(\d+)/(\d+)(?!\d)(?!>)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
     return text_content
 
 def python_layout_engine(raw_text, is_answer_key=False):
-    # 選擇題行內選項自動斷行清洗 (○ A. ○ B. 格式強制斷行)
+    # 選擇題選項強制斷行清洗
     raw_text = re.sub(r'\s*([○●]\s*[A-D]\.)', r'\n\1', raw_text)
     
     raw_text = convert_to_vertical_fractions(raw_text)
     lines = raw_text.split('\n')
     processed_lines = []
     
-    # 引入「當前章節追蹤器」，精準限制只在丙部/丁部加虛線
+    # 引入「當前章節追蹤器」
     current_section = ""
     
     for line in lines:
@@ -155,31 +155,30 @@ def python_layout_engine(raw_text, is_answer_key=False):
             processed_lines.append(f'<div class="exam-user-info">{clean_line}</div>')
             continue
 
-        # 3. 🚀 識別副題目（甲乙丙丁部），強制套用超大 BOLD 樣式
+        # 3. 識別副題目（甲乙丙丁部）
         if re.search(r'^[甲乙丙丁]部：', clean_line) or "部：" in clean_line:
-            current_section = clean_line # 更新當前解析到的章節
+            current_section = clean_line
             processed_lines.append(f'<div class="exam-section-header">{clean_line}</div>')
             continue
 
-        # 4. 選擇題選項強制獨立換行（🛑 拿走任何多餘答題線，純乾淨選項）
+        # 4. 選擇題選項強制換行
         if re.search(r'[○●]\s*[A-D]\.', line):
             if "●" in line: line = line.replace("●", '<span class="mc-ans">●</span>')
             processed_lines.append(f'<div class="mc-option">{line}</div>')
             continue
             
-        # 5. 🛑 填充題（拿走多餘答題線，純粹保留原汁原味）
+        # 5. 填充題
         if "填空" in clean_line or "填充" in clean_line:
             processed_lines.append(f'<div class="fill-blank-row">{line}</div>')
             continue
 
-        # 6. 計算題或應用題（🛑 精密鎖定：只有在題目卷、且當前章節為丙部/丁部、且非答案卷時，才鋪設 4 條虛線！）
+        # 6. 計算題或應用題（只有在題目卷、且當前章節為丙部/丁部、且非答案卷時，才鋪設 4 條虛線！）
         is_applied_or_calc_section = any(s in current_section for s in ["丙部", "丁部", "計算", "應用題", "文字題"])
         if re.match(r'^\d+\.', clean_line) and not is_answer_key and is_applied_or_calc_section:
             processed_lines.append(f'<div class="question-text">{line}</div>')
             processed_lines.append('<div class="write-zone">' + '<div class="row-line"></div>'*4 + '</div>')
             continue
             
-        # 其他普通文字行
         processed_lines.append(f'<div>{line}</div>')
         
     return "\n".join(processed_lines)
@@ -187,7 +186,7 @@ def python_layout_engine(raw_text, is_answer_key=False):
 # ==========================================
 # 3. Streamlit 網頁單欄直落式佈局
 # ==========================================
-# 初始化雙獨立暫存狀態機，完美分流
+# 初始化雙獨立狀態機記憶
 if 'generated_exam' not in st.session_state: st.session_state['generated_exam'] = ""
 if 'generated_answers' not in st.session_state: st.session_state['generated_answers'] = ""
 
@@ -258,17 +257,15 @@ if btn_call_ai:
             contents = []
             final_vault_text = read_from_exam_vault()
             
-            # 使用原生 JSON Schema，100% 免疫平台 Markdown 損毀 Bug
+            # 定義動態說明的文字，精準限制題數
+            mc_instruction = f"必須剛好生成【{mc_count}】題。編號接著前面。" if mc_count > 0 else "不要出任何多項選擇題，甲部留空。"
+            fill_instruction = f"必須剛好生成【{fill_count}】題。編號接著前面。" if fill_count > 0 else "不要出任何填充題，乙部留空。"
+            calc_instruction = f"必須剛好生成【{calc_count}】題。編號接著前面。" if calc_count > 0 else "不要出任何列式計算題，丙部留空。"
+            text_instruction = f"必須剛好生成【{text_count}】題。編號接著前面。" if text_count > 0 else "不要出任何長題目文字題，丁部留空。"
+            
             prompt_text = f"""你是一位熟知香港小學課程、傳統名校考卷風格的資深老師。請為【香港小學{grade}】的學生，製作一份【{subject}】科測驗/考試卷。
             
-            🎯【題型與數量滑桿硬命令】：
-            你出的題型和數量必須嚴格按照以下數字，不准多也不准少：
-            - 多項選擇題：【{mc_count}】題
-            - 填充題：【{fill_count}】題
-            - 列式計算題：【{calc_count}】題
-            - 長題目文字題：【{text_count}】題
-            
-            【🚫 格式輸出最高命令 - 請嚴格回傳標準 JSON 結構】：
+            🎯【格式輸出最高命令 - 請嚴格回傳標準 JSON 結構】：
             請輸出一個標準的 JSON 物件，結構如下：
             {{
               "exam_body": "這裡填寫整份試卷的題目正文（包含試卷大標題、班級姓名欄位、甲乙丙丁部副題目、以及所有題目文字。選擇題選項使用 ○ A. 格式開頭。分數一律採用純文字 3/5 或 2 1/4）",
@@ -291,14 +288,16 @@ if btn_call_ai:
             if uploaded_files:
                 for f in uploaded_files:
                     mime_type = "application/pdf" if f.name.endswith(".pdf") else "image/jpeg"
-                    contents.append({"mime_type": mime_type, "data": f.getvalue()})
+                    contents.append({
+                        "mime_type": mime_type, 
+                        "data": f.getvalue()
+                    })
             
-            # 透過動態拼接 URL，完美避開平台靜態 Link 解析攔截 Bug
             api_host = "https://generativelanguage.googleapis.com"
             api_route = "/v1beta/models/gemini-2.5-flash:generateContent"
             api_url = f"{api_host}{api_route}?key={GEMINI_TOKEN}"
             
-            # 使用 Gemini 2.5 原生 Structured Output (JSON) 完美鎖定輸出格式
+            # 🌟 核心修正一：將 Slider 嘅題數與0條控制，以強硬的 JSON Schema 規則灌入 AI 限制器
             payload = {
                 "contents": [],
                 "generationConfig": {
@@ -306,8 +305,14 @@ if btn_call_ai:
                     "responseSchema": {
                         "type": "OBJECT",
                         "properties": {
-                            "exam_body": {"type": "STRING"},
-                            "answer_body": {"type": "STRING"}
+                            "exam_body": {
+                                "type": "STRING",
+                                "description": f"題目正卷。要求：甲部多項選擇題：{mc_instruction}；乙部填充題：{fill_instruction}；丙部列式計算題：{calc_instruction}；丁部長題目應用題：{text_instruction}"
+                            },
+                            "answer_body": {
+                                "type": "STRING",
+                                "description": "答案頁。必須對應上述出好的題目，一題不漏地提供詳細計算步驟和最終正確答案。"
+                            }
                         },
                         "required": ["exam_body", "answer_body"]
                     }
@@ -331,9 +336,11 @@ if btn_call_ai:
                     raw_ai_output = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
                     parsed_json = json.loads(raw_ai_output)
                     
-                    # ✨ 雙 TextBox 智慧分流落實
+                    # ✨ 寫入後台狀態，並同步寫入 TextBox 內置狀態，防丟記憶鎖死！
                     st.session_state['generated_exam'] = parsed_json.get("exam_body", "")
                     st.session_state['generated_answers'] = parsed_json.get("answer_body", "")
+                    st.session_state['exam_text_editor'] = parsed_json.get("exam_body", "")
+                    st.session_state['ans_text_editor'] = parsed_json.get("answer_body", "")
                     
                     st.success("🎉 題目與答案分流成功！已各自送入下方獨立控制台。")
                     st.rerun()
@@ -352,10 +359,16 @@ col_edit1, col_edit2 = st.columns(2)
 
 with col_edit1:
     st.subheader("💻 題目原始碼暫存區 (只管題目)")
-    def on_exam_change(): st.session_state['generated_exam'] = st.session_state['exam_text_editor']
+    # 🌟 核心修正二：完美的 Session 雙向對齊同步函數，保證不丟失不打架
+    if 'exam_text_editor' not in st.session_state:
+        st.session_state['exam_text_editor'] = st.session_state['generated_exam']
+        
+    def on_exam_change(): 
+        st.session_state['generated_exam'] = st.session_state['exam_text_editor']
+        
     stored_exam = st.text_area(
         "可在這裡直接手動修改或貼上題目：",
-        value=st.session_state['generated_exam'],
+        value=st.session_state['exam_text_editor'],
         height=450,
         key="exam_text_editor",
         on_change=on_exam_change
@@ -363,10 +376,15 @@ with col_edit1:
 
 with col_edit2:
     st.subheader("🔑 答案原始碼暫存區 (只管答案)")
-    def on_ans_change(): st.session_state['generated_answers'] = st.session_state['ans_text_editor']
+    if 'ans_text_editor' not in st.session_state:
+        st.session_state['ans_text_editor'] = st.session_state['generated_answers']
+        
+    def on_ans_change(): 
+        st.session_state['generated_answers'] = st.session_state['ans_text_editor']
+        
     stored_ans = st.text_area(
         "可在這裡直接手動修改或貼上答案、過程：",
-        value=st.session_state['generated_answers'],
+        value=st.session_state['ans_text_editor'],
         height=450,
         key="ans_text_editor",
         on_change=on_ans_change
