@@ -6,14 +6,15 @@ import markdown
 import time
 import re
 from PIL import Image
+import io
 
 # ==========================================
 # 0. 網頁基本設定與【密碼鎖邏輯】
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 應您要求：代碼版本號碼固定為 v1.0.9
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.0.9"
+# 🆕 應您要求：升級至 v1.1.1，內容視覺看圖出題版
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.1.1"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -49,7 +50,7 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# 2. 輔助函式：GitHub API 互動邏輯
+# 2. 輔助函式：GitHub 與圖片/OCR 處理
 # ==========================================
 def upload_to_github(path, content, is_bytes=False):
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
@@ -63,96 +64,70 @@ def upload_to_github(path, content, is_bytes=False):
     requests.put(url, headers=headers, json=data)
     return True
 
-def get_file_from_github(path):
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-    res = requests.get(url, headers=headers)
-    return base64.b64decode(res.json()["content"]) if res.status_code == 200 else None
+def convert_image_to_base64(file_val):
+    image = Image.open(io.BytesIO(file_val))
+    if image.mode != "RGB": image = image.convert("RGB")
+    buffered = io.BytesIO()
+    image.save(buffered, format="JPEG")
+    return base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+def do_gemini_ocr(b64_list):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
+    prompt = "你是一個100%精準的繁體中文與英文打字掃描儀。請一字不漏、按照段落順序將圖片中的所有教學課文和題目文字抄寫下來。直接輸出純文字，不要加入任何解釋。"
+    parts = [{"text": prompt}]
+    for b64 in b64_list:
+        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
+    try:
+        res = requests.post(url, headers={"Content-Type": "application/json"}, json={"contents": [{"parts": parts}]})
+        if res.status_code == 200:
+            return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except:
+        pass
+    return "❌ 圖片辨識失敗，請手動輸入範圍。"
 
 # ==========================================
 # 🚀 🚀 Python 終極分數與視覺排版引擎 🚀 🚀
 # ==========================================
 def convert_to_vertical_fractions(text_content):
-    # 1. 處理帶分數：整數 + 空間 + 分子/分母
-    text_content = re.sub(
-        r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?',
-        r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>',
-        text_content
-    )
-    # 2. 處理獨立的普通分數：分子/分母
-    text_content = re.sub(
-        r'(?<!/)(?<!<)(?<!\d)(?<!">)(\d+)/(\d+)(?!\d)(?!>)(?!/body)',
-        r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>',
-        text_content
-    )
+    text_content = re.sub(r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
+    text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)(?<!">)(\d+)/(\d+)(?!\d)(?!>)(?!/body)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
     return text_content
 
 def python_layout_engine(raw_text, is_answer_key=False):
     lines = raw_text.split('\n')
     processed_lines = []
-    
     for line in lines:
-        if not line.strip():
-            continue
-            
-        # 清除 AI 亂吐的長底線
+        if not line.strip(): continue
         line = re.sub(r'_{4,}', '', line)
-        
-        # 選擇題選項 ○ A. ○ B. 強制獨立換行包裹
         if re.search(r'[○●]\s*[A-D]\.', line):
-            if "●" in line:
-                line = line.replace("●", '<span class="mc-ans">●</span>')
+            if "●" in line: line = line.replace("●", '<span class="mc-ans">●</span>')
             line = convert_to_vertical_fractions(line)
             processed_lines.append(f'<div class="mc-option">{line}</div>')
             continue
-
-        # 填充題加短底線
         if "填空" in line or "填充" in line or re.match(r'^\d+\.', line.strip()) and not re.search(r'[A-D]\.', line) and ("部" not in line) and ("題" not in line):
             if not is_answer_key and ("分" in line or "厘米" in line or "克" in line or "%" in line or "元" in line or line.strip()[-1] in ["：", ":", "。"]):
-                if "丙部" not in raw_text or "計算" not in line:
-                    line += ' <span class="short-line">______</span>'
-
-        # 計算題或應用題，題目後換行，鋪設 4 條虛線
+                if "丙部" not in raw_text or "計算" not in line: line += ' <span class="short-line">______</span>'
         if re.match(r'^\d+\.', line.strip()) and ("丙部" in raw_text or "丁部" in raw_text or "應用題" in line or "計算" in line) and not re.search(r'[A-D]\.', line):
             line = convert_to_vertical_fractions(line)
             processed_lines.append(f'<div class="question-text">{line}</div>')
             if not is_answer_key:
-                lines_html = '<div class="write-zone">' + '<div class="row-line"></div>'*4 + '</div>'
-                processed_lines.append(lines_html)
+                processed_lines.append('<div class="write-zone">' + '<div class="row-line"></div>'*4 + '</div>')
             continue
-            
         line = convert_to_vertical_fractions(line)
         processed_lines.append(f'<div>{line}</div>')
-        
     return "\n".join(processed_lines)
 
 def process_full_exam(raw_gemini_output):
     if "---" in raw_gemini_output:
         parts = raw_gemini_output.split("---")
-        exam_body = python_layout_engine(parts[0], is_answer_key=False)
-        answer_body = python_layout_engine(parts[1], is_answer_key=True)
-        return exam_body + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁 (Answer Key)</h2>' + answer_body
-    else:
-        return python_layout_engine(raw_gemini_output, is_answer_key=False)
+        return python_layout_engine(parts[0], is_answer_key=False) + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁 (Answer Key)</h2>' + python_layout_engine(parts[1], is_answer_key=True)
+    return python_layout_engine(raw_gemini_output, is_answer_key=False)
 
 # ==========================================
-# 3. Streamlit 網頁介面設計
+# 3. Streamlit 網頁持久化數據狀態機
 # ==========================================
-if 'generated_exam' not in st.session_state:
-    st.session_state['generated_exam'] = ""
-
-# --- 舊包裹載入區塊 ---
-st.markdown("### 📂 開啟 / 修改現有包裹")
-with st.container():
-    col_load1, col_load2 = st.columns([3, 1])
-    with col_load1:
-        load_package_name = st.text_input("輸入欲讀取的舊包裹名稱：", placeholder="例如：2026_Term1_Math_Ch1-3", label_visibility="collapsed")
-    with col_load2:
-        if st.button("🔍 載入包裹資料", use_container_width=True) and load_package_name:
-            config_bytes = get_file_from_github(f"exam_packages/{load_package_name}/config.json")
-            if config_bytes: st.success(f"✅ 成功載入包裹：{load_package_name}")
-
-st.write("---") 
+if 'generated_exam' not in st.session_state: st.session_state['generated_exam'] = ""
+if 'ocr_box_content' not in st.session_state: st.session_state['ocr_box_content'] = ""
 
 layout_col1, layout_col2 = st.columns([1, 1])
 
@@ -161,94 +136,110 @@ with layout_col1:
     subject = st.selectbox("選擇科目", ["中文", "英文", "數學", "常識"])
     grade = st.selectbox("選擇年級", ["小一", "小二", "小三", "小四", "小五", "小六"])
     
-    # 🆕 改良功能：更換微調，改為「題型」與「數量」控制區
-    selected_types = st.multiselect(
-        "選擇欲生成的題型 (可多選)：",
-        ["多項選擇", "填充", "列式計算題", "長題目文字題"],
-        default=["多項選擇", "填充", "列式計算題", "長題目文字題"]
-    )
-    total_q_count = st.number_input("預期試卷總題數：", min_value=5, max_value=50, value=20, step=5)
+    st.markdown("🔢 **設定各題型生成數量：**")
+    mc_count = st.slider("1. 多項選擇題 (題數)", 0, 30, 5, step=5)
+    fill_count = st.slider("2. 填充題 (題數)", 0, 30, 5, step=5)
+    calc_count = st.slider("3. 列式計算題 (題數)", 0, 30, 5, step=5)
+    text_count = st.slider("4. 長題目文字題 (題數)", 0, 30, 5, step=5)
+
+    st.write("---")
+    st.markdown("🎯 **選擇範圍提供方式：**")
+    # 🆕 精準修訂選項標籤，更貼合您的操作本意
+    range_mode = st.radio("範圍模式：", ["提供範圍", "提供作業/工作紙"], horizontal=True)
     
-    # 🌟 成功加回：設定考試範圍與橫向圖片縮圖預覽功能
-    st.markdown("### 🎯 設定考試範圍 (圖片/文件)")
-    range_files = st.file_uploader("上傳範圍圖片/文件 (可多選)", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True, key="range_v109")
+    uploaded_files = st.file_uploader("上傳課本圖片或工作紙 (可多選)", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True)
     
-    if range_files:
-        img_files = [f for f in range_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
+    if uploaded_files:
+        img_files = [f for f in uploaded_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
         if img_files:
-            st.markdown("📸 **已上傳的範圍圖片預覽：**")
-            cols = st.columns(min(len(img_files), 5))
+            st.markdown("📸 **上傳檔案預覽：**")
+            preview_cols = st.columns(min(len(img_files), 5))
             for idx, f in enumerate(img_files):
-                with cols[idx % 5]:
-                    try:
-                        img = Image.open(f)
-                        st.image(img, caption=f.name if len(f.name) < 12 else f.name[:9]+"...", use_container_width=True)
-                    except:
-                        pass
-                        
-    package_name = st.text_input("請輸入這個考試包裹的名稱")
+                with preview_cols[idx % 5]:
+                    st.image(Image.open(f), caption=f.name if len(f.name) < 12 else f.name[:9]+"...", use_container_width=True)
+
+    st.markdown("📝 **範圍與備忘文字框 (TextBox)：**")
     
-    # 按鈕一：生成題目
+    if range_mode == "提供範圍":
+        if uploaded_files and st.button("🔍 點擊執行 Gemini 圖片字元識別 (OCR)"):
+            with st.spinner("正在將圖片文字提取至下方 TextBox..."):
+                b64_list = [convert_image_to_base64(f.getvalue()) for f in uploaded_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
+                st.session_state['ocr_box_content'] = do_gemini_ocr(b64_list)
+                st.rerun()
+        
+        text_input_val = st.text_area("在此修改或輸入考試範圍文字：", value=st.session_state['ocr_box_content'], height=150, key="ocr_text_box")
+        st.session_state['ocr_box_content'] = text_input_val
+        
+    else:
+        # 🆕 作業/工作紙模式：自動鎖定提示，逼 AI 直接看圖理解內容
+        st.session_state['ocr_box_content'] = "根據提供之作業/工作紙"
+        st.text_area("範圍狀態：", value=st.session_state['ocr_box_content'], height=60, disabled=True)
+
+    st.write("##")
+    package_name = st.text_input("請輸入這個考試包裹的名稱 (選填)")
+
+    # 🤖 點擊生成題目 (智慧判斷雙流向)
     if st.button("🤖 步驟一：呼叫 Gemini AI 生成新題目", use_container_width=True):
-        if not selected_types:
-            st.error("❌ 請至少勾選一種題目類型！")
+        if mc_count == 0 and fill_count == 0 and calc_count == 0 and text_count == 0:
+            st.error("❌ 請至少將一項題型的滑桿調大於 0！")
         else:
-            with st.spinner("正在讀取範圍檔案並向 Gemini 索取題目原始碼..."):
+            with st.spinner("🚀 正在開啟 Gemini 雙向大腦，全面透視內容出題中..."):
                 contents = []
                 
-                # 建立基礎 Prompt
+                # 建立主 Prompt
                 prompt_text = f"""你是一位熟知香港小學課程、傳統名校考卷風格的資深老師。請為【香港小學{grade}】的學生，製作一份【{subject}】科測驗/考試卷。
                 
-                🎯【題型與數量強制命令】：
-                - 本份試卷預計生成大約【{total_q_count}】題。
-                - 你「只能」在以下指定的題型清單中出題，未勾選的題型絕對不要出：
-                  列出的指定題型：{', '.join(selected_types)}。
+                🎯【題型與數量滑桿硬命令】：
+                你出的題型和數量必須嚴格按照以下數字，不准多也不准少：
+                - 多項選擇題：【{mc_count}】題
+                - 填充題：【{fill_count}】題
+                - 列式計算題：【{calc_count}】題
+                - 長題目文字題：【{text_count}】題
+                """
                 
+                # 🆕 雙流智慧 Prompt 注入
+                if range_mode == "提供範圍":
+                    prompt_text += f"\n🎯【出題內容命令】：請完全根據用家在 TextBox 提供並修改好的以下文本內容進行出題：\n「{st.session_state['ocr_box_content']}」\n"
+                else:
+                    prompt_text += f"\n🎯【出題內容命令】：用家這次選擇了『提供作業/工作紙』模式。請你【一定要用視覺功能看懂】下方附帶的上傳圖片，全盤理解這些工作紙裡面的題目核心概念、知識考點和題型難度，並根據圖片入面的實質內容出一套相似且全新嘅題目！\n"
+                
+                prompt_text += """
                 分數格式請一律採用最單純的數字加斜線表示（例如：3/5 或 2 1/4），乘號用 x，除號用 ÷。
-                
                 選擇題格式：
                 1. 問題文字
                 ○ A. 選項一
                 ○ B. 選項二
                 ○ C. 選項三
                 ○ D. 選項四
-                
                 試卷與答案頁中間使用 `---` 分割。"""
                 
                 contents.append(prompt_text)
                 
-                # 🌟 把用家上傳的範圍檔案（包含圖片內容）完美打包送入 API
-                if range_files:
-                    contents.append("\n【以下是用家上傳的考試範圍教科書/工作紙圖片與文件，請精準參考並出題】：\n")
-                    for f in range_files:
+                # 將圖片打包進去
+                if uploaded_files:
+                    for f in uploaded_files:
                         mime_type = "application/pdf" if f.name.endswith(".pdf") else "image/jpeg"
                         contents.append({"mime_type": mime_type, "data": f.getvalue()})
                 
                 api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
+                payload_data = []
+                for item in contents:
+                    if isinstance(item, str): payload_data.append({"text": item})
+                    else: payload_data.append({"inline_data": {"mime_type": item["mime_type"], "data": base64.b64encode(item["data"]).decode("utf-8")}})
+                
                 try:
-                    res = requests.post(api_url, headers={"Content-Type": "application/json"}, json={"contents": [{"parts": [{"text": t if isinstance(t, str) else t} for t in contents]}]})
-                    # 容錯處理：轉化成符合 requests 結構的發送
-                    payload_data = []
-                    for item in contents:
-                        if isinstance(item, str):
-                            payload_data.append({"text": item})
-                        else:
-                            # 處理圖片型態
-                            payload_data.append({"inline_data": {"mime_type": item["mime_type"], "data": base64.b64encode(item["data"]).decode("utf-8")}})
-                    
                     res = requests.post(api_url, headers={"Content-Type": "application/json"}, json={"contents": [{"parts": payload_data}]})
-                    
                     if res.status_code == 200:
                         st.session_state['generated_exam'] = res.json()['candidates'][0]['content']['parts'][0]['text']
-                        st.success("🤖 題目生成完畢！已成功讀取範圍圖片並送入右側暫存區。")
+                        st.success("🎉 考卷題目已成功對接生成！請點擊下方排版按鈕渲染。")
                         st.rerun()
-                    else: st.error(f"❌ API 報錯: {res.text}")
-                except Exception as e: st.error(f"❌ 失敗: {str(e)}")
+                    else: st.error(f"❌ API 出題報錯: {res.text}")
+                except Exception as e: st.error(f"❌ 網絡異常: {str(e)}")
 
 with layout_col2:
     st.subheader("📝 題目原始碼暫存區")
     st.caption("💡 提示：你可以直接在這裡修改文字，或貼上之前的舊試卷，再點擊下方「排版渲染」進行測試。")
-    stored_text = st.text_area("試卷原始文本控制台", value=st.session_state['generated_exam'], height=450, key="exam_editor")
+    stored_text = st.text_area("試卷原始文本控制台", value=st.session_state['generated_exam'], height=520, key="exam_editor")
     if stored_text != st.session_state['generated_exam']:
         st.session_state['generated_exam'] = stored_text
 
@@ -264,8 +255,10 @@ if st.session_state['generated_exam']:
     with tab1:
         st.markdown(f'<div id="preview-box">{perfect_html_content}</div>', unsafe_allow_html=True)
         if st.button("📝 儲存試卷文本 (exam.md) 到 GitHub"):
-            if package_name and upload_to_github(f"exam_packages/{package_name}/exam.md", st.session_state['generated_exam']):
-                st.success(f"✅ 試卷成功儲存至 GitHub！")
+            if not package_name: st.error("❌ 請先輸入包裹名稱！")
+            else:
+                if upload_to_github(f"exam_packages/{package_name}/exam.md", st.session_state['generated_exam']):
+                    st.success(f"✅ 試卷成功儲存至 GitHub！")
                     
     with tab2:
         html_for_printing = f"""
