@@ -11,8 +11,8 @@ from PIL import Image
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 定義統一的標題與版本號碼 (升級至 v1.0.6)
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.0.6"
+# 定義統一的標題與版本號碼 (升級至 v1.0.7)
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.0.7"
 
 # 初始化 session_state 來記住登入狀態
 if 'authenticated' not in st.session_state:
@@ -178,55 +178,54 @@ if st.button("📦 儲存並打包資料到 GitHub"):
             st.success(f"🎉 打包成功！所有資料已安全儲存。")
 
 # ==========================================
-# 4. 核心功能：【智慧自動重試】直連 2.5 Flash
+# 4. 核心功能：【排版終極優化】直連 2.5 Flash
 # ==========================================
 st.subheader("✨ 4. 生成測驗/考試卷")
 if st.button("🚀 開始利用 Gemini AI 製作試卷"):
-    with st.spinner("🚀 智能排版大腦正在為您構思香港小學風格試卷，請稍候..."):
+    with st.spinner("🚀 正在注入直式分數與選擇題分行魔法，請稍候..."):
         
-        # 建立結合精準排版指令的 Prompt
         prompt_text = f"""你是一位熟知香港小學課程、傳統名校考卷風格與考試制度的資深小學老師。
 請為【香港小學{grade}】的學生，製作一份符合教育局課程指引且難易度適中的【{subject}】科測驗/考試卷。
 
 根據香港小學的真實排版要求，出的題型必須符合以下【精細排版與題型命令】：
 
-⚠️【1. 數學分數與符號 - 鋼鐵禁用令】：
-- 🚫 絕對禁止使用任何 LaTeX 數學格式！不允許出現任何 `$` 符號、`\\frac`、`\\times`、`\\div` 等學術程式碼。
-- 🗣️ 分數和帶分數必須使用最地道、乾淨的香港小學純文字寫法：
-  * 普通分數請用「斜線」表示，例如：3/5、7/9。
-  * 帶分數請用「整數(分子/分母)」表示，例如：2(1/4) 代表二又四分之一。
+⚠️【1. 數學專業直式分數命令（全新升級）】：
+- 🚫 絕對禁止使用任何 LaTeX 數學格式，禁止出現任何 `$` 符號、`\\frac` 等程式碼。
+- 💡 為了解決小學試卷分數排版問題（分子在上面，中間一劃，分母在下面），你必須使用網頁標準的 HTML 上標（sup）和下標（sub）語法來輸出分數！
+  * 普通分數格式：`<sup>分子</sup>/<sub>分母</sub>`
+  * 帶分數格式：`整數<sup>分子</sup>/<sub>分母</sub>`
+  * 範例：三分之五請寫成 `<sup>3</sup>/<sub>5</sub>`；二又四分之一請寫成 `2<sup>1</sup>/<sub>4</sub>`。
   * 乘號請直接用「x」，除號請直接用「÷」。
 
 ⚠️【2. 多項選擇題 (MC) - 換行與答案獨立命令】：
 - 題目自成一行。
 - A、B、C、D 四個選項必須在問題的下方，且「每一個選項必須獨立佔滿一行」，絕對不允許將多個選項合併在同一行！
-- 每個選項前加上一個空心圓圈 `○`。
+- 每個選項前加上一個空心圓圈 `○`。在每個選項的結尾，請加上 `<br>` 標籤以確保絕對分行。
   正確格式範例：
-  1. 以下哪個分數與 2(1/4) 相等？
-     ○ A. 5/4
-     ○ B. 7/4
-     ○ C. 9/4
-     ○ D. 10/4
+  1. 以下哪個分數與 2<sup>1</sup>/<sub>4</sub> 相等？<br>
+     ○ A. <sup>5</sup>/<sub>4</sub><br>
+     ○ B. <sup>7</sup>/<sub>4</sub><br>
+     ○ C. <sup>9</sup>/<sub>4</sub><br>
+     ○ D. <sup>10</sup>/<sub>4</sub><br>
 
 ⚠️【3. 題型分流與特別限制】：
 - 🚫【找錯處 (Proofreading)】題型：這是【英文】科的專屬題型！當前科目是【{subject}】。如果目前不是英文科，絕對不要生成任何找錯處題型！只有英文科需要。
 - 📝【填充題】：空格的答案線必須加長一倍，請統一使用 16 個底線 `________________` 作為答案線。
 - 🧮【列式計算應用題 / 長題目】：題目後面不需要出現「列式：」和「答：」等任何提示文字。請直接提供「4 條長長的空底橫線」讓學生有足夠的空間進行自由列式與寫出計算步驟。
   格式範例：
-  ______________________________________________________
-  ______________________________________________________
-  ______________________________________________________
-  ______________________________________________________
+  ______________________________________________________<br>
+  ______________________________________________________<br>
+  ______________________________________________________<br>
+  ______________________________________________________<br>
 
 【試卷整體結構要求】：
 試卷必須嚴格分為以下兩個部分，並在中間使用 `---` 分割線分開：
 1. 【試卷正文】：包含虛構校名、學生個人資料欄（姓名、班別、學號）、總分、限時。題目要有明確題號、分值。
-2. 【答案頁 (Answer Key)】：緊接在 `---` 之後。多項選擇題的正確答案，請將對應的圓圈變成實心圓圈 `●` 作為示範（例如：● C. 9/4）。
+2. 【答案頁 (Answer Key)】：緊接在 `---` 之後。多項選擇題的正確答案，請將對應的圓圈變成實心圓圈 `●` 作為示範（例如：● C. <sup>9</sup>/<sub>4</sub>）。
 """
         if range_text:
             prompt_text += f"\n【使用者特別指定的微調範圍與重點】：\n{range_text}\n"
             
-        # 智慧 API 調用
         api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
         headers = {"Content-Type": "application/json"}
         payload = {"contents": [{"parts": [{"text": prompt_text}]}]}
@@ -265,9 +264,9 @@ if st.session_state['generated_exam']:
     tab1, tab2 = st.tabs(["📺 網頁預覽與導出儲存", "🖨️ 專業打印預覽"])
     
     with tab1:
-        st.markdown(st.session_state['generated_exam'])
+        st.markdown(st.session_state['generated_exam'], unsafe_allow_html=True)
         st.write("---")
-        if st.button("📝 儲存試卷文本 (exam.md) 到 GitHub"):
+        if st.button("📝 儲卷文本 (exam.md) 到 GitHub"):
             if not package_name:
                 st.error("❌ 請先輸入包裹名稱！")
             else:
@@ -285,9 +284,13 @@ if st.session_state['generated_exam']:
         <style>
             .print-control-bar {{ background-color: #f0f2f6; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-family: sans-serif; }}
             .print-btn {{ background-color: #ff4b4b; color: white; border: none; padding: 10px 20px; font-size: 16px; font-weight: bold; border-radius: 5px; cursor: pointer; }}
-            #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", Arial, sans-serif; line-height: 1.8; color: #000000; padding: 10px; }}
+            #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", Arial, sans-serif; line-height: 2.0; color: #000000; padding: 10px; font-size: 16px; }}
             
-            #exam-body p {{ margin-bottom: 12px; }}
+            #exam-body p {{ margin-bottom: 14px; }}
+            
+            /* CSS 強制換行魔法：只要偵測到選擇題圓圈，自動獨立成行 */
+            #exam-body sup {{ font-size: 0.75em; vertical-align: super; line-height: 0; }}
+            #exam-body sub {{ font-size: 0.75em; vertical-align: sub; line-height: 0; }}
             
             @media print {{
                 .print-control-bar {{ display: none; }}
