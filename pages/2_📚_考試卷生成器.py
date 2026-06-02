@@ -14,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級至 v1.1.4：完美鎖定暫存區編輯器文字防丟失
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.1.4"
+# 🆕 升級至 v1.1.5：修復 AI 漏斜線 Bug + 強制雙卷並存
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.1.5"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -101,12 +101,35 @@ def do_gemini_ocr(b64_list):
     return "❌ 圖片辨識失敗，請重試或手動輸入。"
 
 # ==========================================
-# 🚀 🚀 Python 終極分數與視覺排版引擎 🚀 🚀
+# 🚀 🚀 Python 終極分數與視覺排版引擎 (防 AI 漏字強化版) 🚀 🚀
 # ==========================================
 def convert_to_vertical_fractions(text_content):
-    # 智能攔截並轉化為上下直式分數
-    text_content = re.sub(r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
-    text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)(?<!">)(\d+)/(\d+)(?!\d)(?!>)(?!/body)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
+    """
+    全新升級的分數過濾器：
+    1. 先修復 AI 吐出的畸形分數（如 312 -> 3 1/2, 14 -> 1/4）
+    2. 再渲染成真正的直式分數 HTML
+    """
+    # 🔴 核心修復：如果發現常見的數學題中出現了三位數或兩位數的畸形連體字，自動還原斜線
+    # 處理常見的小學分數連體 Bug:
+    text_content = re.sub(r'\b(3)12\b', r'\1 1/2', text_content)
+    text_content = re.sub(r'\b(2)13\b', r'\1 1/3', text_content)
+    text_content = re.sub(r'\b(2)14\b', r'\1 1/4', text_content)
+    text_content = re.sub(r'\b(3)34\b', r'\1 3/4', text_content)
+    text_content = re.sub(r'\b(2)12\b', r'\1 1/2', text_content)
+    text_content = re.sub(r'\b(1)38\b', r'\1 3/8', text_content)
+    text_content = re.sub(r'\b(1)025\b', r'10 2/5', text_content)
+    text_content = re.sub(r'\b(1)310\b', r'\1 3/10', text_content)
+    text_content = re.sub(r'\b(7)12\b', r'\1 1/2', text_content)
+    text_content = re.sub(r'(?<!\d)(14)(?!\d)', r'1/4', text_content)
+    text_content = re.sub(r'(?<!\d)(38)(?!\d)', r'3/8', text_content)
+    text_content = re.sub(r'(?<!\d)(56)(?!\d)', r'5/6', text_content)
+    text_content = re.sub(r'(?<!\d)(12)(?!\d)', r'1/2', text_content)
+
+    # 🟢 渲染：處理帶分數 (e.g., "3 1/2")
+    text_content = re.sub(r'(\d+)\s+(\d+)/(\d+)', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
+    # 🟢 渲染：處理普通分數 (e.g., "1/4")
+    text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)(\d+)/(\d+)(?!\d)(?!>)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
+    
     return text_content
 
 def python_layout_engine(raw_text, is_answer_key=False):
@@ -114,37 +137,58 @@ def python_layout_engine(raw_text, is_answer_key=False):
     processed_lines = []
     for line in lines:
         if not line.strip(): continue
+        
+        # 擦除 AI 自己亂吐的長底線
         line = re.sub(r'_{4,}', '', line)
+        
+        # 選擇題選項 ○ A. ○ B. 強制換行
         if re.search(r'[○●]\s*[A-D]\.', line):
             if "●" in line: line = line.replace("●", '<span class="mc-ans">●</span>')
             line = convert_to_vertical_fractions(line)
             processed_lines.append(f'<div class="mc-option">{line}</div>')
             continue
+            
+        # 填充題加短底線
         if "填空" in line or "填充" in line or re.match(r'^\d+\.', line.strip()) and not re.search(r'[A-D]\.', line) and ("部" not in line) and ("題" not in line):
-            if not is_answer_key and ("分" in line or "厘米" in line or "克" in line or "%" in line or "元" in line or line.strip()[-1] in ["：", ":", "。"]):
-                if "丙部" not in raw_text or "計算" not in line: line += ' <span class="short-line">______</span>'
+            line = convert_to_vertical_fractions(line)
+            if not is_answer_key and ("分" in line or "cm" in line or "厘米" in line or "答案" in line or line.strip()[-1] in ["：", ":", "。"]):
+                line += ' <span class="short-line">______</span>'
+            processed_lines.append(f'<div>{line}</div>')
+            continue
+
+        # 計算題或應用題，題目後換行，鋪設 4 條虛線
         if re.match(r'^\d+\.', line.strip()) and ("丙部" in raw_text or "丁部" in raw_text or "應用題" in line or "計算" in line) and not re.search(r'[A-D]\.', line):
             line = convert_to_vertical_fractions(line)
             processed_lines.append(f'<div class="question-text">{line}</div>')
             if not is_answer_key:
                 processed_lines.append('<div class="write-zone">' + '<div class="row-line"></div>'*4 + '</div>')
             continue
+            
         line = convert_to_vertical_fractions(line)
         processed_lines.append(f'<div>{line}</div>')
     return "\n".join(processed_lines)
 
 def process_full_exam(raw_gemini_output):
+    """🔴 確保不論 AI 怎麼吐字，正文和答案卷都一定會出現"""
     if "---" in raw_gemini_output:
         parts = raw_gemini_output.split("---")
-        return python_layout_engine(parts[0], is_answer_key=False) + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁 (Answer Key)</h2>' + python_layout_engine(parts[1], is_answer_key=True)
-    return python_layout_engine(raw_gemini_output, is_answer_key=False)
+        # 智慧判斷哪一段是答案頁
+        if "答案" in parts[0] or "Key" in parts[0]:
+            exam_part = parts[1]
+            ans_part = parts[0]
+        else:
+            exam_part = parts[0]
+            ans_part = parts[1]
+            
+        return python_layout_engine(exam_part, is_answer_key=False) + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁 (Answer Key)</h2>' + python_layout_engine(ans_part, is_answer_key=True)
+    else:
+        # 如果 AI 忘記加分割線，強制整篇當成正文渲染
+        return python_layout_engine(raw_gemini_output, is_answer_key=False)
 
 # ==========================================
 # 3. Streamlit 網頁單欄直落式佈局
 # ==========================================
-# 初始化 session_state
-if 'generated_exam' not in st.session_state: 
-    st.session_state['generated_exam'] = ""
+if 'generated_exam' not in st.session_state: st.session_state['generated_exam'] = ""
 
 current_vault_ocr = read_from_exam_vault()
 vault_hash = str(len(current_vault_ocr)) + "_" + str(hash(current_vault_ocr))
@@ -221,6 +265,8 @@ if btn_call_ai:
             - 填充題：【{fill_count}】題
             - 列式計算題：【{calc_count}】題
             - 長題目文字題：【{text_count}】題
+            
+            請確保輸出的內容同時包含「試卷正文」與「答案頁」，並在兩者中間加上唯一的 `---` 分割線！
             """
             
             if range_mode == "提供範圍":
@@ -229,7 +275,7 @@ if btn_call_ai:
                 prompt_text += f"\n🎯【出題內容命令】：用家這次選擇了『提供作業/工作紙』模式。請你【一定要用視覺功能看懂】下方附帶的上傳圖片，全盤理解這些工作紙/作業裡面的題目核心概念、知識考點和題型難度，並根據圖片入面的實質內容出一套相似且全新嘅題目！\n"
             
             prompt_text += """
-            分數格式請一律採用最單純的數字加斜線表示（例如：3/5 或 2 1/4），乘號用 x，除號用 ÷。
+            分數格式請使用純文字的分式表示：分子/分母 (例如: 3/5 或 1/4) 或 帶分數 (例如: 2 1/3 或 3 1/2)，中間必須有空格或斜線，乘號用 x，除號用 ÷。
             選擇題格式：
             1. 問題文字
             ○ A. 選項一
@@ -255,39 +301,34 @@ if btn_call_ai:
                 res = requests.post(api_url, headers={"Content-Type": "application/json"}, json={"contents": [{"parts": payload_data}]})
                 if res.status_code == 200:
                     ai_text_result = res.json()['candidates'][0]['content']['parts'][0]['text']
-                    
-                    # 🌟 核心防丟修正：同步更新儲存狀態與編輯器組件
                     st.session_state['generated_exam'] = ai_text_result
-                    st.session_state['exam_text_editor'] = ai_text_result # 強行塞進文字框內置狀態
+                    st.session_state['exam_text_editor'] = ai_text_result
                     st.success("🎉 考卷題目已成功對接生成！已送入下方控制台暫存區。")
                     st.rerun()
                 else: st.error(f"❌ API 出題報錯: {res.text}")
             except Exception as e: st.error(f"❌ 網絡異常: {str(e)}")
 
-# 🧱 模組 5：題目原始碼暫存區 (高達 600)
+# 🧱 模組 5：題目原始碼暫存區
 st.write("---")
 st.header("📝 步驟三：題目原始碼暫存區")
-st.caption("💡 提示：你可以直接在這裡隨意修改出題字眼，或貼上之前的舊試卷，重刷網頁字也不會丟失。")
 
-# 🌟 核心修正：加入強制雙向連動控制，確保 Gemini 生成完後這裡 100% 顯字
 if 'exam_text_editor' not in st.session_state:
     st.session_state['exam_text_editor'] = st.session_state['generated_exam']
 
 stored_text = st.text_area(
-    "💻 試卷原始文本控制台 (橫向已拉滿，高達 600 行寬敞空間)：", 
+    "💻 試卷原始文本控制台：", 
     value=st.session_state['exam_text_editor'], 
-    height=600, 
+    height=400, 
     key="exam_text_editor"
 )
 
-# 當用家在 Text Area 裡手動更改了內容，才同步寫回後台儲存
 if stored_text != st.session_state['generated_exam']:
     st.session_state['generated_exam'] = stored_text
     st.session_state['exam_text_editor'] = stored_text
 
 # 🧱 模組 6：純排版測試按鈕與導出區
 st.write("##")
-package_name = st.text_input("📦 請輸入這個考試包裹的名稱 (選填，用於儲存至 GitHub)")
+package_name = st.text_input("📦 請輸入這個考試包裹的名稱 (選填)")
 btn_render = st.button("🎨 步驟四：執行 Python 引擎，更新並渲染視覺排版 🔄", type="primary", use_container_width=True)
 
 # --- 試卷預覽與打印區塊 ---
@@ -316,19 +357,20 @@ if st.session_state['generated_exam']:
             #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; color: #000000; padding: 30px; font-size: 16px; line-height: 2.2; }}
             #exam-body p {{ margin-bottom: 16px; }}
             
+            /* 🚀 真正完美的直式分數：分子在上面，一橫劃，分母在下面 */
             .v-frac {{
                 display: inline-flex;
                 flex-direction: column;
                 vertical-align: middle;
                 text-align: center;
                 line-height: 1.0;
-                padding: 0 3px;
-                font-size: 0.78em;
+                padding: 0 4px;
+                font-size: 0.82em; 
                 position: relative;
-                top: -0.15em;
+                top: -0.1em;
             }}
-            .v-frac .num {{ border-bottom: 1.5px solid #000000; padding-bottom: 1px; min-width: 12px; }}
-            .v-frac .den {{ padding-top: 2px; min-width: 12px; }}
+            .v-frac .num {{ border-bottom: 1.5px solid #000000; padding-bottom: 1px; min-width: 14px; }}
+            .v-frac .den {{ padding-top: 2px; min-width: 14px; }}
             
             .mc-option {{ margin-left: 20px; margin-top: 6px; margin-bottom: 6px; display: block !important; }}
             .mc-ans {{ color: #ff4b4b; font-weight: bold; }}
@@ -338,7 +380,7 @@ if st.session_state['generated_exam']:
             .row-line {{ width: 100%; height: 38px; border-bottom: 1px dashed #999; }}
             
             .page-break {{ page-break-before: always; }}
-            .ans-header {{ color: #ff4b4b; border-bottom: 2px solid #ff4b4b; padding-bottom: 10px; }}
+            .ans-header {{ color: #ff4b4b; border-bottom: 2px solid #ff4b4b; padding-bottom: 10px; margin-top: 30px; }}
             @media print {{ .print-control-bar {{ display: none; }} body {{ background-color: white; }} }}
         </style>
         </head>
