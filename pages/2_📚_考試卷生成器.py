@@ -11,8 +11,8 @@ from PIL import Image
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 應您要求：定義統一的標題與版本號碼
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.0.4"
+# 定義統一的標題與版本號碼 (升級至 v1.0.5)
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.0.5"
 
 # 初始化 session_state 來記住登入狀態
 if 'authenticated' not in st.session_state:
@@ -20,37 +20,32 @@ if 'authenticated' not in st.session_state:
 
 # 如果還未登入，顯示密碼輸入框
 if not st.session_state['authenticated']:
-    # 🆕 修正：入密碼時就顯示一模一樣的標題
     st.title(APP_TITLE)
     st.info("🔒 此工具受保護，請輸入密碼以解鎖並使用。")
     
-    # 密碼輸入框
     pwd_input = st.text_input("輸入專屬訪問密碼：", type="password")
     
     if st.button("解鎖 🔓"):
         if pwd_input == "royroy":
             st.session_state['authenticated'] = True
             st.success("✅ 密碼正確！正在載入工具...")
-            st.rerun()  # 重新整理網頁，進入下方主程式
+            st.rerun()
         elif pwd_input != "":
             st.error("❌ 密碼錯誤，請重試！")
             
-    st.stop() # 阻斷未登入者執行下方代碼
+    st.stop()
 
 # ==========================================
 # 主程式 (只有解鎖後才會執行)
 # ==========================================
-# 🆕 保持標題一致
 st.title(APP_TITLE)
 
 # ==========================================
-# 1. 安全金鑰設定 (完美對接默書機的 Secrets)
+# 1. 安全金鑰設定
 # ==========================================
 try:
     GITHUB_TOKEN = st.secrets["GIT_TOKEN"]
     GEMINI_TOKEN = st.secrets["GEMINI_TOKEN"]
-    
-    # 這裡借用默書 APP 設定好的 Repo 資訊
     GITHUB_REPO = "rlsw"
     GITHUB_USER = "rlsw-collab"
 except Exception as e:
@@ -136,12 +131,11 @@ with col2:
 st.subheader("🎯 1. 設定考試範圍")
 range_files = st.file_uploader("上傳範圍圖片/文件 (可多選)", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True, key="range")
 
-# 🆕 縮圖預覽功能：如果用家上傳了範圍檔案，自動生成圖片縮圖
 if range_files:
     img_files = [f for f in range_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
     if img_files:
         st.markdown("📸 **已上傳的範圍圖片預覽：**")
-        cols = st.columns(min(len(img_files), 6)) # 每行最多排 6 張縮圖
+        cols = st.columns(min(len(img_files), 6))
         for idx, f in enumerate(img_files):
             with cols[idx % 6]:
                 try:
@@ -156,7 +150,6 @@ range_text = st.text_area("微調範圍 (例如：只考第一至三課、加強
 st.subheader("📝 2. 題目類型參考")
 style_files = st.file_uploader("上傳工作紙/作業參考 (可多選)", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True, key="style")
 
-# 🆕 縮圖預覽功能：如果用家上傳了題型參考，自動生成圖片縮圖
 if style_files:
     style_img_files = [f for f in style_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
     if style_img_files:
@@ -185,26 +178,43 @@ if st.button("📦 儲存並打包資料到 GitHub"):
             st.success(f"🎉 打包成功！所有資料已安全儲存。")
 
 # ==========================================
-# 4. 核心功能：【智慧自動重試】直連 Gemini 2.5 Flash
+# 4. 核心功能：【排版優化 + 智慧自動重試】直連 2.5 Flash
 # ==========================================
 st.subheader("✨ 4. 生成測驗/考試卷")
 if st.button("🚀 開始利用 Gemini AI 製作試卷"):
-    with st.spinner("🚀 智能 Gemini 2.5 Flash 正在為您出題中（如遇伺服器擁堵會自動重試），請稍候..."):
+    with st.spinner("🚀 智能排版大腦正在為您構思香港小學風格試卷，請稍候..."):
         
-        # 建立強大的出卷 Prompt
-        prompt_text = f"你是一位熟知香港小學課程與考試制度的資深小學老師。請為【香港小學{grade}】的學生，製作一份符合教育局課程指引且難易度適中的【{subject}】科測驗/考試卷。\n"
+        # 建立結合精準排版指令的 Prompt
+        prompt_text = f"""你是一位熟知香港小學課程、傳統名校考卷風格與考試制度的資深小學老師。
+請為【香港小學{grade}】的學生，製作一份符合教育局課程指引且難易度適中的【{subject}】科測驗/考試卷。
+
+根據香港小學的真實排版要求，你出的題型必須豐富多樣（包括多項選擇題、填充題、找錯處 Proofreading、長題目/應用題等），且必須嚴格執行以下【鋼鐵排版命令】：
+
+⚠️【多項選擇題 (MC) 鋼鐵排版命令】：
+1. 題目下方必須提供 A, B, C, D 四個選項。
+2. 【換行規定】：題目自成一行。下行必須是 A 選項，再下行是 B 選項，如此類推，每個選項必須「獨立換行」，絕對不允許將多個選項擠在同一行！
+3. 【圓圈塗黑設計】：每個選項的英文字母前面，必須加上一個空心圓圈 `○`。
+   格式範例：
+   1. 以下哪一個是香港的特區 flowers？
+      ○ A. 紫荊花
+      ○ B. 桃花
+      ○ C. 鬱金香
+      ○ D. 玫瑰花
+
+⚠️【其他題型排版命令】：
+- 【填充題】：空格請使用 `______` 橫線，並在題尾或合適位置標明分值，例如 `(2分)`。
+- 【找錯處 (Proofreading)】：如果是英文科或中文科，請提供一段文章，並在每行右側留下括號 `(  )` 或底線供學生修正錯誤。
+- 【長題目 / 應用題】：題目後必須預留充足的「答題空白行」或「（  ）」答案欄，如果是數學科應用題，必須提醒學生寫出「列式及答題」。
+
+【試卷整體結構要求】：
+試卷必須嚴格分為以下兩個部分，並在中間使用 `---` 分割線分開：
+1. 【試卷正文】：包含虛構校名、學生個人資料欄（姓名、班別、學號）、總分、限時。題目要有明確題號、分值。
+2. 【答案頁 (Answer Key)】：緊接在 `---` 之後。多項選擇題的正確答案，請將對應的圓圈變成實心圓圈 `●` 作為示範（例如：● B. 桃花）。
+"""
         if range_text:
-            prompt_text += f"\n【特別指定的微調範圍】：\n{range_text}\n"
+            prompt_text += f"\n【使用者特別指定的微調範圍與重點】：\n{range_text}\n"
             
-        prompt_text += """
-        🎯 【出題任務與排版要求】：
-        請製作一份最符合香港本地小學風格的專業試卷。
-        試卷必須嚴格分為以下兩個部分，並在中間使用 `---` 分割線分開：
-        1. 【試卷正文】：包含虛構校名、學生個人資料欄、總分、限時。題目要有題號、分數。題型要多元化並符合該年級水準。
-        2. 【答案頁 (Answer Key)】：緊接在 `---` 之後，列出標準答案及評分標準。
-        請使用清晰的 Markdown 格式輸出。
-        """
-        
+        # 鎖定 100% 支援的 2.5 Flash
         api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_TOKEN}"
         headers = {"Content-Type": "application/json"}
         payload = {
@@ -269,7 +279,11 @@ if st.session_state['generated_exam']:
         <style>
             .print-control-bar {{ background-color: #f0f2f6; padding: 15px; border-radius: 8px; margin-bottom: 20px; font-family: sans-serif; }}
             .print-btn {{ background-color: #ff4b4b; color: white; border: none; padding: 10px 20px; font-size: 16px; font-weight: bold; border-radius: 5px; cursor: pointer; }}
-            #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", Arial, sans-serif; line-height: 1.6; color: #000000; padding: 10px; }}
+            #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", Arial, sans-serif; line-height: 1.8; color: #000000; padding: 10px; }}
+            
+            /* CSS 魔法：微調 MC 題目行高與縮進，讓空心圓圈排版更整齊 */
+            #exam-body p {{ margin-bottom: 8px; }}
+            
             @media print {{
                 .print-control-bar {{ display: none; }}
                 body {{ background-color: white; }}
