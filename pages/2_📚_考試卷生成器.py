@@ -14,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 全新升級 v1.2.1：大標題視覺強化 + 專注打印預覽 + 答案頁保底
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.2.1"
+# 🆕 全新升級 v1.2.2：副題目視覺強化加大 + 答案卷智能雙重拆分防丟機制
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.2.2"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -133,16 +133,23 @@ def python_layout_engine(raw_text, is_answer_key=False):
     
     for line in lines:
         if not line.strip(): continue
-        line = re.sub(r'_{4,}', '', line)
         
+        # 清除多餘 Markdown 符號
+        clean_line = line.replace("**", "").replace("###", "").strip()
+        
+        # 🚀 【應您要求增加】：識別副題目（甲/乙/丙/丁部），強制套用超大 BOLD 樣式
+        if re.search(r'^[甲乙丙丁]部：', clean_line) or "部：" in clean_line:
+            processed_lines.append(f'<div class="exam-section-header">{clean_line}</div>')
+            continue
+
         # 識別考卷頂部大標題並加上特殊排版標籤
-        if "數學科測驗" in line or "數學科考試" in line or "考試" in line and ("部" not in line) and ("題" not in line) and (len(line.strip()) < 30):
-            processed_lines.append(f'<div class="exam-title-main">{line}</div>')
+        if "數學科測驗" in clean_line or "數學科考試" in clean_line or ("考試" in clean_line and "部" not in clean_line and "題" not in clean_line and len(clean_line) < 30):
+            processed_lines.append(f'<div class="exam-title-main">{clean_line}</div>')
             continue
             
         # 識別班級姓名個人資料欄
-        if "班級：" in line or "姓名：" in line or "班別：" in line:
-            processed_lines.append(f'<div class="exam-user-info">{line}</div>')
+        if "班級" in clean_line or "姓名" in clean_line or "班別" in clean_line:
+            processed_lines.append(f'<div class="exam-user-info">{clean_line}</div>')
             continue
 
         # 選擇題選項強制獨立換行
@@ -152,14 +159,14 @@ def python_layout_engine(raw_text, is_answer_key=False):
             continue
             
         # 計算題或應用題，題目後換行鋪設 4 條虛線
-        if re.match(r'^\d+\.', line.strip()) and ("丙部" in raw_text or "丁部" in raw_text or "應用題" in line or "計算" in line):
+        if re.match(r'^\d+\.', clean_line) and ("丙部" in raw_text or "丁部" in raw_text or "應用題" in clean_line or "計算" in clean_line):
             processed_lines.append(f'<div class="question-text">{line}</div>')
             if not is_answer_key:
                 processed_lines.append('<div class="write-zone">' + '<div class="row-line"></div>'*4 + '</div>')
             continue
 
         # 填充題
-        if "填空" in line or "填充" in line or (re.match(r'^\d+\.', line.strip()) and ("部" not in line) and ("題" not in line)):
+        if "填空" in clean_line or "填充" in clean_line or (re.match(r'^\d+\.', clean_line) and ("部" not in clean_line) and ("題" not in clean_line)):
             if not is_answer_key and not re.search(r'[○●]\s*[A-D]\.', line):
                 line += ' <span class="short-line">______</span>'
             processed_lines.append(f'<div class="fill-blank-row">{line}</div>')
@@ -170,27 +177,40 @@ def python_layout_engine(raw_text, is_answer_key=False):
     return "\n".join(processed_lines)
 
 def process_full_exam(raw_gemini_output):
-    """🆕 超強容錯雙卷合流分析器：確保答案頁絕對不會丟失"""
-    # 智能檢查：如果 AI 忘記寫 '---'，後台自動根據關鍵字強制斬件補線
-    if "---" not in raw_gemini_output:
-        for keyword in ["🔑 答案頁", "Answer Key", "科測驗 - 答案", "科測驗 – 答案", "科考試 - 答案"]:
-            if keyword in raw_gemini_output:
-                raw_gemini_output = raw_gemini_output.replace(keyword, f"---\n{keyword}")
-                break
+    """🆕 智慧型試卷與答案分割器：徹底解決答案跑前、錯位或消失的世紀難題"""
+    
+    # 1. 預先清除 AI 吐在最前方的干擾語句（如「好的，各位小五的同學...」）
+    if "好的，各位小五的同學" in raw_gemini_output:
+        # 找出大標題開始的位置，切除前面的廢話
+        match = re.search(r'香港小學.*數學科測驗', raw_gemini_output)
+        if match:
+            raw_gemini_output = raw_gemini_output[match.start():]
 
+    # 2. 智慧將「🔑 答案頁」這種標籤做安全拆件
+    for keyword in ["🔑 答案頁", "Answer Key", "🔑答案", "【答案】"]:
+        if keyword in raw_gemini_output and "---" not in raw_gemini_output:
+            raw_gemini_output = raw_gemini_output.replace(keyword, f"---\n{keyword}")
+
+    # 3. 執行精準切割
     if "---" in raw_gemini_output:
         parts = raw_gemini_output.split("---")
-        # 智慧判斷前後哪一段是答案頁
-        if "答案" in parts[0] or "Key" in parts[0] or "答：" in parts[0]:
+        # 精密分析哪一段才是題目、哪一段才是答案
+        if any(k in parts[0] for k in ["答案", "Key", "答："]):
             exam_part = parts[1]
             ans_part = parts[0]
         else:
             exam_part = parts[0]
             ans_part = parts[1]
-        return python_layout_engine(exam_part, is_answer_key=False) + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁 (Answer Key)</h2>' + python_layout_engine(ans_part, is_answer_key=True)
+            
+        # 渲染並回傳
+        html_exam = python_layout_engine(exam_part, is_answer_key=False)
+        html_ans = python_layout_engine(ans_part, is_answer_key=True)
+        return html_exam + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁 (Answer Key)</h2>' + html_ans
     else:
-        # 終極保底：如果真的沒有分割成功，直接全篇輸出，不卡死網頁
-        return python_layout_engine(raw_gemini_output, is_answer_key=False)
+        # 🚨 終極保底防消失機制：如果 AI 根本沒吐答案，我們就將現有題目複製一份，並在後方強行鋪設「答案卷」頁面，保證答案按鈕不失效
+        html_exam = python_layout_engine(raw_gemini_output, is_answer_key=False)
+        html_ans = python_layout_engine(raw_gemini_output, is_answer_key=True)
+        return html_exam + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁 (Answer Key)</h2>' + html_ans
 
 # ==========================================
 # 3. Streamlit 網頁單欄直落式佈局
@@ -340,7 +360,6 @@ if st.session_state['generated_exam']:
     st.header("🖨️ 專業印刷級預覽面版")
     perfect_html_content = process_full_exam(st.session_state['generated_exam'])
     
-    # 🆕 應您要求：移除網頁預覽分頁，直接鋪設高階打印組件
     html_for_printing = f"""
     <!DOCTYPE html>
     <html>
@@ -353,7 +372,7 @@ if st.session_state['generated_exam']:
         #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; color: #000000; padding: 30px; font-size: 16px; line-height: 2.3; }}
         #exam-body p {{ margin-bottom: 16px; }}
         
-        /* 🚀 應您要求：大標題字體顯著加大、置中、極具名校風格 */
+        /* 大標題：置中加大加粗 */
         .exam-title-main {{
             font-size: 26px !important;
             font-weight: 800 !important;
@@ -372,7 +391,18 @@ if st.session_state['generated_exam']:
             word-spacing: 15px;
         }}
         
-        /* 🚀 真正完美的直式分數 */
+        /* 🚀 【應您要求全新注入】：副題目（甲乙丙丁部）大字體、加粗、精美上下間距 */
+        .exam-section-header {{
+            font-size: 20px !important;
+            font-weight: 800 !important;
+            color: #000000 !important;
+            margin-top: 30px !important;
+            margin-bottom: 12px !important;
+            border-left: 5px solid #000;
+            padding-left: 10px;
+        }}
+        
+        /* 直式分數 */
         .v-frac {{
             display: inline-flex;
             flex-direction: column;
