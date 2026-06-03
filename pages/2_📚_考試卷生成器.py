@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.10.6：終極穿透快取版！加入時間戳 Cache Busting 引擎，強制穿透 GitHub CDN 的 5 分鐘快取，實現 0 延遲秒速載入最新檔案！
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.6"
+# 🆕 升級 v1.10.7：終極無快取直連版！捨棄 raw CDN，改用 GitHub API 原生 v3.raw 協議，徹底擊碎 5 分鐘快取延遲，實現 100% 即時讀寫同步！
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.7"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -98,7 +98,6 @@ def upload_knowledge_base_to_github(name, b64_images, status_ui=None):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', name)
     path = f"knowledge_base/{safe_name}.json"
     
-    # 加入時間戳強制不抓快取
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref=main&t={int(time.time())}"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
@@ -107,7 +106,7 @@ def upload_knowledge_base_to_github(name, b64_images, status_ui=None):
     }
     
     sha = None
-    if status_ui: status_ui.info("⏳ [1/3] 正在與 GitHub 驗證舊檔案狀態...")
+    if status_ui: status_ui.info("⏳ [1/3] 正在與 GitHub 核心資料庫驗證狀態...")
     add_log(f"開始儲存程序：查詢 {name} 是否存在舊檔案...")
     
     res = requests.get(url, headers=headers)
@@ -115,7 +114,7 @@ def upload_knowledge_base_to_github(name, b64_images, status_ui=None):
         sha = res.json().get("sha")
         add_log(f"找到舊檔案 SHA: {sha}，將進行覆寫更新。")
     
-    if status_ui: status_ui.info("⏳ [2/3] 正在將圖片編碼為大檔案 JSON 格式...")
+    if status_ui: status_ui.info("⏳ [2/3] 正在將圖片安全編碼...")
     payload_data = {
         "kb_name": name,
         "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -133,13 +132,13 @@ def upload_knowledge_base_to_github(name, b64_images, status_ui=None):
         
     write_url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
     
-    if status_ui: status_ui.info("🚀 [3/3] 正在上傳至 GitHub 雲端，大檔案傳輸約需 3-5 秒，請稍候...")
+    if status_ui: status_ui.info("🚀 [3/3] 正在極速上傳至 GitHub 雲端，大檔案傳輸約需 3-5 秒，請稍候...")
     add_log(f"推送大數據至雲端，總張數：{len(b64_images)}")
     
     put_res = requests.put(write_url, headers=headers, json=put_payload)
     
     if put_res.status_code in [200, 201]:
-        add_log(f"✅ 成功！狀態碼: {put_res.status_code}")
+        add_log(f"✅ 成功寫入！狀態碼: {put_res.status_code}")
         return True
     else:
         add_log(f"❌ 儲存失敗！錯誤碼 {put_res.status_code}: {put_res.text}")
@@ -167,7 +166,6 @@ def delete_knowledge_base_from_github(name):
     return False
 
 def list_knowledge_bases_from_github():
-    # 🌟 穿透 1: 目錄列表防止快取
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/knowledge_base?ref=main&t={int(time.time())}"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
@@ -184,21 +182,25 @@ def list_knowledge_bases_from_github():
 
 def get_knowledge_base_content(kb_name, status_ui=None):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', kb_name)
-    # 🌟 穿透 2: 大檔案下載防止快取，追加動態 Timestamp
-    raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/knowledge_base/{safe_name}.json?t={int(time.time())}"
+    # 🌟 破冰絕招：改用 GitHub API 核心路徑，放棄 raw.githubusercontent 慢速 CDN
+    api_raw_url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/knowledge_base/{safe_name}.json?ref=main&t={int(time.time())}"
+    
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
+        # 🌟 魔法標頭：強制 GitHub API 直接吐出原生檔案內容，無視 1MB 限制且絕對不留 CDN 快取！
+        "Accept": "application/vnd.github.v3.raw",
         "Cache-Control": "no-cache"
     }
     
-    if status_ui: status_ui.info("⏳ 正在由 GitHub 高速通道下載最新大檔案資料，請稍候...")
-    add_log(f"啟動穿透快取大檔案抓取: {raw_url}")
+    if status_ui: status_ui.info("⏳ 正在由 GitHub 核心資料庫直連下載最新大檔案資料，請稍候...")
+    add_log(f"啟動 API 原生協議抓取 (擊碎 CDN): {api_raw_url}")
     
     try:
-        res = requests.get(raw_url, headers=headers)
+        res = requests.get(api_raw_url, headers=headers)
         if res.status_code == 200:
+            # 由於用咗 v3.raw，返回嘅就係完美乾淨嘅 JSON 原始字串
             parsed_data = res.json()
-            add_log(f"🎉 新鮮讀取成功！共 {len(parsed_data.get('images', []))} 張圖。")
+            add_log(f"🎉 零延遲新鮮讀取成功！共 {len(parsed_data.get('images', []))} 張圖。")
             if status_ui: status_ui.empty() 
             return parsed_data
         else:
