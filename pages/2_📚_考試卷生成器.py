@@ -318,6 +318,15 @@ def python_layout_engine(raw_text, is_answer_key=False):
         line = re.sub(r'([\(（])\s{2,}([\)）])', r'\1 <span class="fill-blank-underline"></span> \2', line)
         line = convert_to_vertical_fractions(line)
 
+        # 🆕 新增：自動為填充題的子題目（如 一、二、三 或 1, 2）結尾補上答題線
+        is_fill_section = any(s in current_section for s in ["第二", "填充", "填空", "FILL"])
+        if is_fill_section and not is_answer_key:
+            # 匹配以括號中文或數字開頭的行，例如 (一) 1234 或 (1) 5678
+            if re.match(r'^[\(（][一二三四五六七八九十\d]+[\)）]', clean_line):
+                # 如果該行本身還沒有任何底線標籤，則自動在尾端加上一條答題線
+                if '<span class="fill-blank-underline">' not in line:
+                    line = f'{line} <span class="fill-blank-underline"></span>'
+
         # 6. 手寫答題紙 (列式與長題目)
         is_applied_or_calc_section = any(s in current_section for s in ["第三", "第四", "計算", "應用題", "文字題", "長題目"])
         
