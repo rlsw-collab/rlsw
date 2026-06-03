@@ -5,7 +5,7 @@
     "backup": 25
   },
   "dictation_tool": {
-    "main": 0,
+    "main": 1,
     "backup": 0
   }
 }
