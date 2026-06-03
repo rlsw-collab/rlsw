@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.10.4：極簡操作版！移除混亂的清除暫存按鈕，加入動態 API 讀寫進度提示，大幅提升大檔案傳輸時的 UX 體驗
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.4"
+# 🆕 升級 v1.10.5：終極整合版 UX！統一新舊檔案工作區、加入載入按鈕、全局重置引擎，儲存後完美還原初始狀態
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.5"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -191,7 +191,7 @@ def get_knowledge_base_content(kb_name, status_ui=None):
         if res.status_code == 200:
             parsed_data = res.json()
             add_log(f"🎉 讀取成功！共 {len(parsed_data.get('images', []))} 張圖。")
-            if status_ui: status_ui.empty() # 清除提示
+            if status_ui: status_ui.empty() 
             return parsed_data
         else:
             add_log(f"❌ 讀取失敗。狀態碼: {res.status_code}")
@@ -215,7 +215,7 @@ def ensure_flat_string(val):
     return str(val)
 
 # ==========================================
-# 🛡️ AI 核心生成與圖片分析通道
+# 🛡️ AI 核心生成通道
 # ==========================================
 def call_pure_free_multiverse_ai(messages, is_json=True):
     if AI_TOKEN:
@@ -246,7 +246,7 @@ def call_pure_free_multiverse_ai(messages, is_json=True):
     return None
 
 # ==========================================
-# 🎨 🛠️ 幾何圖形 SVG 印刷級動態渲染器 🛠️ 🎨
+# 🎨 🛠️ 幾何圖形 SVG 動態渲染器 🛠️ 🎨
 # ==========================================
 def draw_svg_geometry(marker_str):
     try:
@@ -432,9 +432,17 @@ def python_layout_engine(raw_text, is_answer_key=False):
 # ==========================================
 tab_exam, tab_kb = st.tabs(["📝 試卷生成工具", "📂 雲端多圖知識庫管理"])
 
-if 'kb_current_b64_list' not in st.session_state: st.session_state['kb_current_b64_list'] = []
-if 'new_uploaded_cache' not in st.session_state: st.session_state['new_uploaded_cache'] = []
-if 'last_loaded_kb' not in st.session_state: st.session_state['last_loaded_kb'] = ""
+# 🌟 全域快取狀態初始化
+if 'working_images' not in st.session_state: st.session_state['working_images'] = []
+if 'working_kb_name' not in st.session_state: st.session_state['working_kb_name'] = ""
+if 'uploader_key_counter' not in st.session_state: st.session_state['uploader_key_counter'] = 0
+
+# 🌟 核心引擎：洗淨還原至 Ready-To-Use 狀態
+def reset_kb_state():
+    st.session_state['working_images'] = []
+    st.session_state['working_kb_name'] = ""
+    st.session_state['debug_logs'] = []
+    st.session_state['uploader_key_counter'] += 1
 
 # ------------------------------------------
 # TAB 1: 試卷生成核心
@@ -625,133 +633,127 @@ with tab_exam:
         components.html(html_for_printing, height=1200, scrolling=True)
 
 # ------------------------------------------
-# TAB 2: 雲端多圖知識庫管理 (v1.10.4 即時進度 UX 升級版)
+# TAB 2: 雲端多圖知識庫管理 (v1.10.5 終極整合無縫版)
 # ------------------------------------------
 with tab_kb:
     st.header("📂 雲端課文/作業/工作紙知識庫管理")
-    st.info("💡 你可以在這裡建立、追加修改或徹底刪除雲端檔案儲存庫，上傳的檔案將會永久保存。")
     
-    # 預留一個動態提示空間給讀取和寫入時顯示進度
-    loading_status_box = st.empty()
+    # 頂部控制欄：操作模式切換與全域重置
+    col_mode, col_reset = st.columns([3, 1])
+    with col_mode:
+        if 'prev_action' not in st.session_state: st.session_state['prev_action'] = "🆕 建立全新知識庫"
+        kb_action = st.radio("⚙️ 請選擇操作模式：", ["🆕 建立全新知識庫", "✏️ 編輯 / 追加現有知識庫"], horizontal=True)
+        if kb_action != st.session_state['prev_action']:
+            st.session_state['prev_action'] = kb_action
+            reset_kb_state() # 切換模式時自動還原乾淨狀態
+            st.rerun()
+            
+    with col_reset:
+        if st.button("🔄 重置並重新開始", use_container_width=True):
+            reset_kb_state()
+            st.rerun()
+            
+    st.write("---")
     
-    kb_action = st.radio("⚙️ 請選擇操作模式：", ["🆕 建立全新知識庫", "✏️ 編輯 / 追加現有知識庫"], horizontal=True, key="kb_action_radio")
-    current_kb_name = ""
-    
+    # 🌟 動態工作區顯示控制邏輯
+    show_workspace = False
+
     if kb_action == "🆕 建立全新知識庫":
-        st.session_state['last_loaded_kb'] = ""
-    
-    if kb_action == "✏️ 編輯 / 追加現有知識庫":
+        new_name_input = st.text_input("📝 請輸入全新知識庫名稱：", value=st.session_state['working_kb_name'], key="new_kb_name_input")
+        if new_name_input != st.session_state['working_kb_name']:
+            st.session_state['working_kb_name'] = new_name_input
+        show_workspace = True
+
+    elif kb_action == "✏️ 編輯 / 追加現有知識庫":
         cloud_lists = list_knowledge_bases_from_github()
         if not cloud_lists:
-            st.warning("⚠️ 目前雲端沒有任何知識庫，已為你自動切換為新建模式。")
-            kb_action = "🆕 建立全新知識庫"
+            st.warning("⚠️ 目前雲端沒有任何知識庫，請切換回「建立全新知識庫」。")
         else:
-            st.markdown("### 📁 選擇與管理雲端庫")
-            col_sel, col_del = st.columns([3, 1])
+            st.markdown("### 📁 選擇與載入雲端庫")
+            col_sel, col_load, col_del = st.columns([2, 1, 1])
             with col_sel:
                 selected_edit_kb = st.selectbox("請選擇要讀取的雲端知識庫：", cloud_lists, key="tab2_edit_kb_selector")
+            with col_load:
+                if st.button("📥 載入", use_container_width=True):
+                    loading_status_box = st.empty()
+                    kb_payload = get_knowledge_base_content(selected_edit_kb, status_ui=loading_status_box)
+                    if kb_payload:
+                        st.session_state['working_images'] = kb_payload.get("images", [])
+                        st.session_state['working_kb_name'] = selected_edit_kb
+                        st.success(f"🎉 已成功載入「{selected_edit_kb}」！現在你可以追加或刪減檔案。")
+                        time.sleep(0.8)
+                        st.rerun()
             with col_del:
                 if selected_edit_kb:
-                    if st.button(f"🗑️ 徹底刪除整個「{selected_edit_kb}」", type="primary", use_container_width=True, key="del_entire_kb_btn"):
+                    if st.button("🗑️ 刪除", type="primary", use_container_width=True, key="del_entire_kb_btn"):
+                        loading_status_box = st.empty()
                         loading_status_box.info("⏳ 正在由 GitHub 徹底刪除知識庫...")
                         if delete_knowledge_base_from_github(selected_edit_kb):
                             st.success(f"🔥 雲端知識庫「{selected_edit_kb}」已徹底抹除！")
-                            st.session_state['last_loaded_kb'] = ""
-                            st.session_state['kb_current_b64_list'] = []
-                            time.sleep(1.0)
+                            time.sleep(0.8)
+                            reset_kb_state()
                             st.rerun()
+                            
+            if st.session_state['working_kb_name']:
+                st.info(f"✏️ 當前正在編輯知識庫：**{st.session_state['working_kb_name']}**")
+                show_workspace = True
+            else:
+                st.warning("💡 請先選擇上方的知識庫並按下「📥 載入」按鈕。")
 
-            if selected_edit_kb:
-                current_kb_name = selected_edit_kb
-                if st.session_state['last_loaded_kb'] != selected_edit_kb:
-                    add_log(f"🔄 偵測到選擇切換。開始抓取雲端知識庫：【{selected_edit_kb}】")
-                    # 傳入 status_box 顯示動態進度
-                    kb_payload = get_knowledge_base_content(selected_edit_kb, status_ui=loading_status_box)
-                    if kb_payload:
-                        st.session_state['kb_current_b64_list'] = kb_payload.get("images", [])
-                        st.session_state['last_loaded_kb'] = selected_edit_kb
+    # 🌟 終極統一上傳與管理工作區
+    if show_workspace:
+        st.write("---")
+        st.markdown("### 📥 上傳與檔案管理區")
+        
+        # 1. 拖拉上傳區域 (與快取無縫接軌)
+        uploaded_files = st.file_uploader("📸 請選擇或拖放上傳新檔案...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key=f"kb_uploader_{st.session_state['uploader_key_counter']}")
+        if uploaded_files:
+            new_added = False
+            for f in uploaded_files:
+                b64_str = base64.b64encode(f.read()).decode("utf-8")
+                clean_new_b64 = re.sub(r'\s+', '', b64_str)
+                if clean_new_b64 not in st.session_state['working_images']:
+                    st.session_state['working_images'].append(clean_new_b64)
+                    new_added = True
+            if new_added:
+                add_log(f"📥 成功追加新檔案。目前總張數：{len(st.session_state['working_images'])}")
 
-                st.write("##")
-                st.markdown(f"### 📦 雲端已存檔案預覽（共 {len(st.session_state['kb_current_b64_list'])} 張）：")
-                
-                if len(st.session_state['kb_current_b64_list']) == 0:
-                    st.info("💡 該知識庫內目前沒有任何檔案圖片。")
-                else:
-                    cols = st.columns(4)
-                    keep_images = []
-                    for img_idx, b64_data in enumerate(st.session_state['kb_current_b64_list']):
-                        with cols[img_idx % 4]:
-                            clean_pure_b64 = re.sub(r'\s+', '', str(b64_data))
-                            clean_src = clean_pure_b64 if clean_pure_b64.startswith("data:image") else f"data:image/jpeg;base64,{clean_pure_b64}"
-                            try:
-                                st.image(clean_src, use_container_width=True)
-                                # 💡 UX 優化：將刪除文字寫得更明確，讓用家知道要按儲存才生效
-                                if st.checkbox("❌ 標記為刪除 (儲存後生效)", key=f"del_img_check_{img_idx}"):
-                                    st.error("⚠️ 已標記，儲存後正式剔除")
-                                else:
-                                    keep_images.append(b64_data)
-                            except Exception:
-                                st.error(f"⚠️ 圖片 {img_idx+1} 解碼渲染出錯")
-                                
-                    if len(keep_images) != len(st.session_state['kb_current_b64_list']):
-                        st.session_state['kb_current_b64_list'] = keep_images
+        # 2. 全局整合預覽 Grid (包含舊載入與新上傳)
+        if st.session_state['working_images']:
+            st.markdown(f"#### 🔍 檔案預覽與管理（共 {len(st.session_state['working_images'])} 張）")
+            cols = st.columns(4)
+            for i, b64_data in enumerate(st.session_state['working_images']):
+                with cols[i % 4]:
+                    clean_src = b64_data if b64_data.startswith("data:image") else f"data:image/jpeg;base64,{b64_data}"
+                    st.image(clean_src, use_container_width=True)
+                    # 💡 UX 優化：直接移除該張圖片並即時重整網頁反映結果
+                    if st.button("❌ 刪除", key=f"del_img_btn_{i}"):
+                        st.session_state['working_images'].pop(i)
+                        st.rerun()
 
-    st.write("---")
-    st.markdown("### 📥 上傳與追加新檔案" if kb_action == "✏️ 編輯 / 追加現有知識庫" else "### 📥 建立全新檔案資料庫")
-    
-    if kb_action == "🆕 建立全新知識庫":
-        current_kb_name = st.text_input("📝 請輸入全新知識庫名稱：", value="", key="new_kb_name_input")
-        st.session_state['kb_current_b64_list'] = []
-    
-    uploaded_files = st.file_uploader("📸 請選擇或拖放上傳檔案 (如需取消請按檔名旁邊的 X)：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="kb_file_uploader")
-    if uploaded_files:
-        for f in uploaded_files:
-            f_bytes = f.read()
-            b64_str = base64.b64encode(f_bytes).decode("utf-8")
-            clean_new_b64 = re.sub(r'\s+', '', b64_str)
-            if clean_new_b64 not in st.session_state['new_uploaded_cache']:
-                st.session_state['new_uploaded_cache'].append(clean_new_b64)
-                add_log(f"📥 檔案追加至快取成功")
-
-    if st.session_state['new_uploaded_cache']:
-        st.markdown(f"#### 🔍 準備追加的新相片預覽（目前已累計：{len(st.session_state['new_uploaded_cache'])} 張）")
-        preview_cols = st.columns(5)
-        for f_idx, b64_str in enumerate(st.session_state['new_uploaded_cache']):
-            clean_new_src = b64_str if b64_str.startswith("data:image") else f"data:image/jpeg;base64,{b64_str}"
-            with preview_cols[f_idx % 5]:
-                st.image(clean_new_src, use_container_width=True, caption=f"準備追加第 {f_idx+1} 張")
-
-    # 💾 動態儲存按鈕處理區
-    st.write("##")
-    save_status_box = st.empty() # 專門顯示儲存進度的 Box
-    
-    if st.button("💾 儲存並同步至雲端知識庫", type="primary", use_container_width=True, key="save_kb_final_btn"):
-        if not current_kb_name.strip():
-            st.error("❌ 請輸入或選擇有效的知識庫名稱！")
-        else:
-            total_images = st.session_state['kb_current_b64_list'] + st.session_state['new_uploaded_cache']
-            
-            if not total_images:
+        # 3. 💾 動態儲存按鈕處理區
+        st.write("##")
+        save_status_box = st.empty()
+        
+        if st.button("💾 儲存並同步至雲端知識庫", type="primary", use_container_width=True):
+            if not st.session_state['working_kb_name'].strip():
+                st.error("❌ 請確認知識庫名稱不為空！")
+            elif not st.session_state['working_images']:
                 st.error("❌ 知識庫內不能沒有任何有效檔案！")
             else:
-                # 💡 UX 優化：即時回饋開始儲存，令按鈕不會感覺無反應
                 save_status_box.info("🚀 開始啟動儲存程序，請稍候...")
-                
-                success = upload_knowledge_base_to_github(current_kb_name.strip(), total_images, status_ui=save_status_box)
+                success = upload_knowledge_base_to_github(st.session_state['working_kb_name'].strip(), st.session_state['working_images'], status_ui=save_status_box)
                 
                 if success:
-                    save_status_box.success(f"🎉 儲存成功！雲端知識庫「{current_kb_name}」已更新 (共 {len(total_images)} 張圖)。網頁即將重新整理...")
+                    save_status_box.success("🎉 儲存成功！網頁即將洗淨並重置為初始狀態...")
                     st.toast("🎉 雲端知識庫儲存成功！", icon="✅")
-                    
-                    st.session_state['kb_current_b64_list'] = []
-                    st.session_state['new_uploaded_cache'] = []
-                    st.session_state['last_loaded_kb'] = ""
-                    time.sleep(1.5) # 畀時間用家睇到成功訊息再 rerun
+                    time.sleep(1.5)
+                    reset_kb_state() # 儲存完畢後全自動重置
                     st.rerun()
                 else:
                     save_status_box.error("❌ 同步失敗！請立刻查看下方黃色偵錯面板獲取 GitHub API 的具體拒絕原因。")
 
-    # 日誌面板
+    # 4. 日誌面板
     st.write("##")
     with st.expander("🛠️ 系統後台偵錯日誌面板 (Debug Logs)", expanded=False):
         if st.session_state['debug_logs']:
