@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.9.9：終極修復！引入 GitHub Raw 大檔案分流綠色通道，徹底解決突破 1MB 限制時的 JSON 碎裂死白問題
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.9.9"
+# 🆕 升級 v1.10.0：終極強固！雙向鎖定 master 分支，強制重刷快取機制，全面防禦儲存無效與同步斷層
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.0"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -93,20 +93,25 @@ def read_from_exam_vault():
     path = get_exam_vault_path()
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
-# 🛠️ GitHub 雲端知識庫 CRUD 函數組
+# 🛠️ GitHub 雲端知識庫 CRUD 雙向強固函數組
 def upload_knowledge_base_to_github(name, b64_images):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', name)
     path = f"knowledge_base/{safe_name}.json"
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
+    # 🔒 強制鎖定 master 分支進行查詢與寫入
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref=master"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json"
     }
     
     sha = None
+    add_log(f"💾 準備儲存更新，正在向 GitHub 查詢舊有檔案的 SHA 標籤...")
     res = requests.get(url, headers=headers)
     if res.status_code == 200:
         sha = res.json().get("sha")
+        add_log(f"✅ 成功獲取舊檔案 SHA: {sha}，本次將執行覆蓋覆寫 (Overwrite)。")
+    else:
+        add_log(f"💡 未找到舊檔案 SHA (狀態碼: {res.status_code})，本次將視為全新檔案建立。")
         
     payload_data = {
         "kb_name": name,
@@ -119,18 +124,26 @@ def upload_knowledge_base_to_github(name, b64_images):
     
     put_payload = {
         "message": f"Save knowledge base: {name} [skip ci]",
-        "content": content_b64
+        "content": content_b64,
+        "branch": "master" # 🔒 明確指示寫入 master 分支
     }
     if sha:
         put_payload["sha"] = sha
         
-    put_res = requests.put(url, headers=headers, json=put_payload)
+    write_url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
+    add_log(f"🚀 正在推送最新數據至 GitHub...")
+    put_res = requests.put(write_url, headers=headers, json=put_payload)
+    
+    add_log(f"🔔 GitHub 儲存回應狀態碼: {put_res.status_code}")
+    if put_res.status_code not in [200, 201]:
+        add_log(f"❌ 儲存失敗！GitHub 錯誤回應：{put_res.text}")
+        
     return put_res.status_code in [200, 201]
 
 def delete_knowledge_base_from_github(name):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', name)
     path = f"knowledge_base/{safe_name}.json"
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref=master"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json"
@@ -140,14 +153,15 @@ def delete_knowledge_base_from_github(name):
         sha = res.json().get("sha")
         delete_payload = {
             "message": f"Delete knowledge base: {name} [skip ci]",
-            "sha": sha
+            "sha": sha,
+            "branch": "master"
         }
-        del_res = requests.delete(url, headers=headers, json=delete_payload)
+        del_res = requests.delete(f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}", headers=headers, json=delete_payload)
         return del_res.status_code == 200
     return False
 
 def list_knowledge_bases_from_github():
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/knowledge_base"
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/knowledge_base?ref=master"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json"
@@ -162,7 +176,6 @@ def list_knowledge_bases_from_github():
 
 def get_knowledge_base_content(kb_name):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', kb_name)
-    # 🚀【核心重構線】：為大檔案分流改用 GitHub Raw 原始資料通道，不再走 API content 欄位以免內容被截斷
     raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/master/knowledge_base/{safe_name}.json"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}"
@@ -172,7 +185,6 @@ def get_knowledge_base_content(kb_name):
         res = requests.get(raw_url, headers=headers)
         add_log(f"遠端 Raw 通道回應狀態碼: {res.status_code}")
         if res.status_code == 200:
-            # 直接下載的就是我們當初存進去的原始 JSON 字串，完全免去 API content 二次轉譯損壞的風險
             parsed_data = res.json()
             add_log(f"🎉 原始資料加載成功！知識庫名稱: {parsed_data.get('kb_name')}, 內含圖片張數: {len(parsed_data.get('images', []))}")
             return parsed_data
@@ -245,7 +257,6 @@ def draw_svg_geometry(marker_str):
                 params[k.strip()] = v.strip()
                 
         svg_code = ""
-        
         if g_type == "three_circles_linear":
             r1 = params.get("r1", "10")
             r3 = params.get("r3", "7")
@@ -264,7 +275,6 @@ def draw_svg_geometry(marker_str):
             </svg>
             </div>
             """
-            
         elif g_type == "circles_in_rectangle":
             w = params.get("w", "24")
             h = params.get("h", "12")
@@ -281,7 +291,6 @@ def draw_svg_geometry(marker_str):
             </svg>
             </div>
             """
-            
         elif g_type == "concentric_overlap":
             d1 = params.get("d1", "16")
             svg_code = f"""
@@ -297,7 +306,6 @@ def draw_svg_geometry(marker_str):
             </svg>
             </div>
             """
-            
         elif g_type == "triangle":
             b = params.get("b", "15")
             h = params.get("h", "10")
@@ -312,7 +320,6 @@ def draw_svg_geometry(marker_str):
             </svg>
             </div>
             """
-
         elif g_type == "cuboid_volume":
             l = params.get("l", "12")
             w = params.get("w", "8")
@@ -358,12 +365,10 @@ def python_layout_engine(raw_text, is_answer_key=False):
     for line in lines:
         if not line.strip(): continue
         clean_line = line.strip()
-        
         if any(s in clean_line for s in ["部：", "部分：", "部", "部分", "Section:", "Part:"]):
             current_section = clean_line
             processed_lines.append(f'<div class="exam-section-header">{clean_line}</div>')
             continue
-            
         if any(s in clean_line for s in ["測驗", "考試", "試卷", "Quiz", "Test", "Exam"]) and len(clean_line) < 45:
             processed_lines.append(f'<div class="exam-title-main">{clean_line}</div>')
             continue
@@ -489,17 +494,13 @@ with tab_exam:
                 st.toast("🔮 正在由 GPT-4o 深度解構所有知識庫圖片以建立精準試題庫...", icon="📦")
                 
                 analysis_messages = [
-                    {"role": "system", "content": "You are a professional curriculum analyzer. Your task is to analyze multiple images from textbooks/worksheets and synthesize them into a highly concise but detailed blueprint of knowledge points, core concepts, formulas, and common exercise patterns for test item generation. Output purely in Chinese if requested, or English."}
+                    {"role": "system", "content": "You are a professional curriculum analyzer. Your task is to analyze multiple images from textbooks/worksheets and synthesize them into a highly concise but detailed blueprint of knowledge points, core concepts, formulas, and common exercise patterns for test item generation."}
                 ]
-                
                 user_content = [{"type": "text", "text": "請深度分析這批由用戶上傳的工作紙與課本內容。提煉出裡面所有的考點、題型結構、幾何數字邏輯與公式，為稍後的出題做最萬全的知識儲備基礎。"}]
                 for b64_img in chosen_kb_images:
                     clean_b64_data = re.sub(r'\s+', '', b64_img)
                     clean_b64 = clean_b64_data if clean_b64_data.startswith("data:image") else f"data:image/jpeg;base64,{clean_b64_data}"
-                    user_content.append({
-                        "type": "image_url",
-                        "image_url": {"url": clean_b64}
-                    })
+                    user_content.append({"type": "image_url", "image_url": {"url": clean_b64}})
                     
                 analysis_messages.append({"role": "user", "content": user_content})
                 synthesized_knowledge = call_pure_free_multiverse_ai(analysis_messages, is_json=False)
@@ -512,25 +513,23 @@ with tab_exam:
             has_geometry = any(kw in final_vault_text.lower() for kw in ["圓", "三角", "面積", "體積", "長方體", "正方體", "circle", "triangle", "area", "volume", "cuboid"])
             geo_rule = ""
             if has_geometry:
-                if language == "繁體中文":
-                    geo_rule = f"""
-                    ⚠️【核心幾何命令】：考量到本次範圍涉及幾何，你必須在題目中穿插嵌入幾何圖形標記。
-                    - [GEOMETRIC:three_circles_linear:r1=大圓半徑;r2=中圓半徑;r3=小圓半徑]
-                    - [GEOMETRIC:circles_in_rectangle:w=長方形長;h=長方形闊]
-                    - [GEOMETRIC:concentric_overlap:d1=大圓直徑]
-                    - [GEOMETRIC:triangle:b=三角形底;h=三角形高]
-                    - [GEOMETRIC:cuboid_volume:l=長方體長;w=長方體闊;h=長方體高]
-                    """
+                geo_rule = f"""
+                ⚠️【核心幾何命令】：考量到本次範圍涉及幾何，你必須在題目中穿插嵌入幾何圖形標記。
+                - [GEOMETRIC:three_circles_linear:r1=大圓半徑;r2=中圓半徑;r3=小圓半徑]
+                - [GEOMETRIC:circles_in_rectangle:w=長方形長;h=長方形闊]
+                - [GEOMETRIC:concentric_overlap:d1=大圓直徑]
+                - [GEOMETRIC:triangle:b=三角形底;h=三角形高]
+                - [GEOMETRIC:cuboid_volume:l=長方體長;w=長方體闊;h=長方體高]
+                """
 
             tasks = []
-            if language == "繁體中文":
-                if mc_count > 0: tasks.append((f"第一部分：多項選擇題（共 {mc_count} 題）", mc_count))
-                if fill_count > 0: tasks.append((f"第二部分：填充題（共 {fill_count} 題）", fill_count))
-                if calc_count > 0: tasks.append((f"第三部分：列式計算題（共 {calc_count} 題）", calc_count))
-                if text_count > 0: tasks.append((f"第四部分：長題目文字題（共 {text_count} 題）", text_count))
-                
-                combined_exam = f"### 香港小學{grade}{subject}科測驗卷\n班別：__________  姓名：__________  學號：__________\n\n"
-                combined_ans = "### 🔑 答案頁與幾何解題詳解 (Answer Key)\n\n"
+            if mc_count > 0: tasks.append((f"第一部分：多項選擇題（共 {mc_count} 題）", mc_count))
+            if fill_count > 0: tasks.append((f"第二部分：填充題（共 {fill_count} 題）", fill_count))
+            if calc_count > 0: tasks.append((f"第三部分：列式計算題（共 {calc_count} 題）", calc_count))
+            if text_count > 0: tasks.append((f"第四部分：長題目文字題（共 {text_count} 題）", text_count))
+            
+            combined_exam = f"### 香港小學{grade}{subject}科測驗卷\n班別：__________  姓名：__________  學號：__________\n\n"
+            combined_ans = "### 🔑 答案頁與幾何解題詳解 (Answer Key)\n\n"
             
             progress_bar = st.progress(0.0)
             task_step = 1.0 / len(tasks) if tasks else 1.0
@@ -552,14 +551,13 @@ with tab_exam:
             st.rerun()
 
 # ------------------------------------------
-# TAB 2: 雲端多圖知識庫管理 (大檔案 Raw 綠色通道終極無暇版)
+# TAB 2: 雲端多圖知識庫管理 (雙向強固版)
 # ------------------------------------------
 with tab_kb:
     st.header("📂 雲端課文/作業/工作紙知識庫管理")
     st.info("💡 你可以在這裡建立、追加修改或徹底刪除雲端檔案儲存庫，上傳的檔案將會永久保存。")
     
     kb_action = st.radio("⚙️ 請選擇操作模式：", ["🆕 建立全新知識庫", "✏️ 編輯 / 追加現有知識庫"], horizontal=True, key="kb_action_radio")
-    
     current_kb_name = ""
     
     if kb_action == "🆕 建立全新知識庫":
@@ -573,10 +571,8 @@ with tab_kb:
         else:
             st.markdown("### 📁 選擇與管理雲端庫")
             col_sel, col_del = st.columns([3, 1])
-            
             with col_sel:
                 selected_edit_kb = st.selectbox("請選擇要讀取的雲端知識庫：", cloud_lists, key="tab2_edit_kb_selector")
-            
             with col_del:
                 if selected_edit_kb:
                     if st.button(f"🗑️ 徹底刪除整個「{selected_edit_kb}」", type="primary", use_container_width=True, key="del_entire_kb_btn"):
@@ -589,16 +585,13 @@ with tab_kb:
 
             if selected_edit_kb:
                 current_kb_name = selected_edit_kb
-                
-                # 同步載入遠端大檔案
                 if st.session_state['last_loaded_kb'] != selected_edit_kb:
+                    add_log(f"🔄 偵測到選擇切換。開始抓取雲端知識庫：【{selected_edit_kb}】")
                     kb_payload = get_knowledge_base_content(selected_edit_kb)
                     if kb_payload:
                         st.session_state['kb_current_b64_list'] = kb_payload.get("images", [])
                         st.session_state['last_loaded_kb'] = selected_edit_kb
-                    else:
-                        add_log("⚠️ 錯誤：無法獲取到有效的 JSON 數據流。")
-                
+
                 st.write("##")
                 st.markdown(f"### 📦 雲端已存檔案預覽（共 {len(st.session_state['kb_current_b64_list'])} 張）：")
                 
@@ -611,14 +604,13 @@ with tab_kb:
                         with cols[img_idx % 4]:
                             clean_pure_b64 = re.sub(r'\s+', '', str(b64_data))
                             clean_src = clean_pure_b64 if clean_pure_b64.startswith("data:image") else f"data:image/jpeg;base64,{clean_pure_b64}"
-                            
                             try:
                                 st.image(clean_src, use_container_width=True)
                                 if st.checkbox("❌ 刪除此檔案", key=f"del_img_check_{img_idx}"):
                                     st.caption("⚠️ 已剔除")
                                 else:
                                     keep_images.append(b64_data)
-                            except Exception as img_err:
+                            except Exception:
                                 st.error(f"⚠️ 圖片 {img_idx+1} 解碼渲染出錯")
                                 
                     if len(keep_images) != len(st.session_state['kb_current_b64_list']):
@@ -631,9 +623,7 @@ with tab_kb:
         current_kb_name = st.text_input("📝 請輸入全新知識庫名稱：", value="", key="new_kb_name_input")
         st.session_state['kb_current_b64_list'] = []
     
-    # 檔案上傳器
     uploaded_files = st.file_uploader("📸 請選擇或拖放上傳檔案：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="kb_file_uploader")
-    
     if uploaded_files:
         temp_new_b64s = []
         for f in uploaded_files:
@@ -646,16 +636,14 @@ with tab_kb:
     else:
         st.session_state['new_uploaded_cache'] = []
 
-    # 渲染新上傳檔案預覽區
     if st.session_state['new_uploaded_cache']:
         st.markdown("#### 🔍 新上傳檔案即時預覽：")
         preview_cols = st.columns(5)
         for f_idx, b64_str in enumerate(st.session_state['new_uploaded_cache']):
             clean_new_src = b64_str if b64_str.startswith("data:image") else f"data:image/jpeg;base64,{b64_str}"
             with preview_cols[f_idx % 5]:
-                st.image(clean_new_src, use_container_width=True, caption=f"新上傳檔案 {f_idx+1}")
+                st.image(clean_new_src, use_container_width=True, caption=f"新上傳 {f_idx+1}")
 
-    # 儲存與同步按鈕
     st.write("##")
     if st.button("💾 儲存並同步至雲端知識庫", type="primary", use_container_width=True, key="save_kb_final_btn"):
         if not current_kb_name.strip():
@@ -668,14 +656,15 @@ with tab_kb:
                 with st.spinner("正在安全編碼並上傳同步至 GitHub 雲端..."):
                     success = upload_knowledge_base_to_github(current_kb_name.strip(), total_images)
                     if success:
-                        st.success(f"🎉 雲端知識庫「{current_kb_name}」已成功保存並更新！")
+                        st.success(f"🎉 雲端知識庫「{current_kb_name}」已成功保存並更新！正在清理本機快取...")
+                        # 🌟 儲存成功後強制洗乾淨本機快取暫存，迫使下一輪讀取雲端最新的完整大檔案
                         st.session_state['kb_current_b64_list'] = []
                         st.session_state['new_uploaded_cache'] = []
                         st.session_state['last_loaded_kb'] = ""
-                        time.sleep(0.5)
+                        time.sleep(1.0)
                         st.rerun()
                     else:
-                        st.error("❌ 同步失敗，請確認 GitHub Secrets 設定。")
+                        st.error("❌ 同步失敗！請立刻查看下方黃色偵錯面板獲取 GitHub API 的具體拒絕原因。")
 
     # 日誌面板
     st.write("##")
@@ -683,6 +672,3 @@ with tab_kb:
         if st.session_state['debug_logs']:
             log_text = "\n".join(st.session_state['debug_logs'][::-1])
             st.text_area("即時系統軌跡日誌：", value=log_text, height=200, key="system_debug_logs_view")
-            if st.button("🧹 清空日誌"):
-                st.session_state['debug_logs'] = []
-                st.rerun()
