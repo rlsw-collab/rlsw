@@ -14,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.7.0：分批不偷懶版 (分部獨立呼叫機制 + 拒絕省略號 + 幾何自動偵測 + Step 5 滑桿)
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.7.0"
+# 🆕 升級 v1.7.5：全圖形完美排版版 (全面支援三角形與體積 + 選擇題自動分行 + 答題線完美對齊 + iPad OS 列印)
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.7.5"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -188,10 +188,30 @@ def call_pure_free_multiverse_ai(text_prompt):
             pass
     return None
 
+def do_gemini_ocr_with_fallback(b64_list, gemini_token):
+    prompt = "你是一個100%精準的繁體中文與英文幾何工作紙打字掃描儀。請將圖片中的所有幾何圖形題目文字、數字、選項抄寫下來。直接輸出純文字，不要加入任何解釋。"
+    parts = [{"text": prompt}]
+    for b64 in b64_list: parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
+    payload = {"contents": [{"parts": parts}]}
+    models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash"]
+    for model_id in models:
+        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={gemini_token}"
+        try:
+            res = requests.post(api_url, headers={"Content-Type": "application/json"}, json=payload, timeout=40)
+            if res.status_code == 200:
+                increment_github_counter("main")
+                return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        except: continue
+    return "❌ 圖片辨識失敗，請稍候重試或手動輸入。"
+
 # ==========================================
-# 🎨 🛠️ 幾何圖形 SVG 印刷級動態渲染器 🛠️ 🎨
+# 🎨 🛠️ 幾何圖形 SVG 印刷級動態渲染器 (含三角形與體積) 🛠️ 🎨
 # ==========================================
 def draw_svg_geometry(marker_str):
+    """
+    解析語法：[GEOMETRIC:type:param1=val1;param2=val2]
+    並動態回傳黑白高對比、印刷級幾何向量圖
+    """
     try:
         marker_str = marker_str.replace("[", "").replace("]", "")
         parts = marker_str.split(":")
@@ -205,52 +225,100 @@ def draw_svg_geometry(marker_str):
                 params[k.strip()] = v.strip()
                 
         svg_code = ""
+        
+        # 題型一：三圓連心切點題 (模擬工作紙第3, 5題)
         if g_type == "three_circles_linear":
-            r1 = params.get("r1", "6")
-            r3 = params.get("r3", "3")
+            r1 = params.get("r1", "10")
+            r3 = params.get("r3", "7")
             svg_code = f"""
-            <div style="text-align:center; margin:15px 0;">
-            <svg width="280" height="150" style="background:white;">
+            <div class="geo-container" style="text-align:center; margin:15px 0;">
+            <svg width="280" height="150" style="background:white; border:1px solid #ddd; border-radius:6px; display:inline-block;">
                 <circle cx="100" cy="75" r="55" stroke="black" stroke-width="1.8" fill="none" />
                 <circle cx="85" cy="75" r="40" stroke="black" stroke-width="1.5" fill="none" stroke-dasharray="2 2" />
                 <circle cx="180" cy="75" r="25" stroke="black" stroke-width="1.8" fill="none" />
                 <line x1="45" y1="75" x2="205" y2="75" stroke="black" stroke-width="1" stroke-dasharray="4" />
-                <circle cx="45" cy="75" r="2.5" fill="black"/><text x="40" y="95" font-size="13">P</text>
-                <circle cx="85" cy="75" r="2.5" fill="black"/><text x="80" y="95" font-size="13">Q</text>
-                <circle cx="180" cy="75" r="2.5" fill="black"/><text x="175" y="95" font-size="13">R</text>
-                <text x="50" y="65" font-size="11" font-weight="bold">半徑 {r1}cm</text>
-                <text x="170" y="65" font-size="11" font-weight="bold">半徑 {r3}cm</text>
+                <circle cx="45" cy="75" r="2.5" fill="black"/><text x="40" y="95" font-size="13" font-family="sans-serif">P</text>
+                <circle cx="85" cy="75" r="2.5" fill="black"/><text x="80" y="95" font-size="13" font-family="sans-serif">Q</text>
+                <circle cx="180" cy="75" r="2.5" fill="black"/><text x="175" y="95" font-size="13" font-family="sans-serif">R</text>
+                <text x="50" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑 {r1}cm</text>
+                <text x="165" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑 {r3}cm</text>
             </svg>
             </div>
             """
+            
+        # 題型二：長方形內切雙圓題 (模擬工作紙第2題)
         elif g_type == "circles_in_rectangle":
-            w = params.get("w", "20")
-            h = params.get("h", "10")
+            w = params.get("w", "24")
+            h = params.get("h", "12")
             svg_code = f"""
-            <div style="text-align:center; margin:15px 0;">
-            <svg width="260" height="140" style="background:white;">
+            <div class="geo-container" style="text-align:center; margin:15px 0;">
+            <svg width="260" height="140" style="background:white; border:1px solid #ddd; border-radius:6px; display:inline-block;">
                 <rect x="20" y="20" width="220" height="100" stroke="black" stroke-width="2" fill="none" />
                 <circle cx="70" cy="70" r="50" stroke="black" stroke-width="1.5" fill="none" />
                 <circle cx="170" cy="70" r="50" stroke="black" stroke-width="1.5" fill="none" />
                 <line x1="70" y1="70" x2="120" y2="70" stroke="black" stroke-width="1.2" />
                 <circle cx="70" cy="70" r="2" fill="black" />
-                <text x="110" y="15" font-size="12" font-weight="bold">長方形長 = {w} cm</text>
-                <text x="25" y="65" font-size="11" transform="rotate(-90 25,65)">闊 = {h} cm</text>
+                <text x="110" y="15" font-size="12" font-weight="bold" font-family="sans-serif">長方形長 = {w} cm</text>
+                <text x="25" y="65" font-size="11" font-family="sans-serif" transform="rotate(-90 25,65)">闊 = {h} cm</text>
             </svg>
             </div>
             """
+            
+        # 題型三：大小圓重疊 / 半徑同心圓組合 (模擬工作紙第1, 4題)
         elif g_type == "concentric_overlap":
-            d1 = params.get("d1", "14")
+            d1 = params.get("d1", "16")
             svg_code = f"""
-            <div style="text-align:center; margin:15px 0;">
-            <svg width="220" height="160" style="background:white;">
+            <div class="geo-container" style="text-align:center; margin:15px 0;">
+            <svg width="220" height="160" style="background:white; border:1px solid #ddd; border-radius:6px; display:inline-block;">
                 <circle cx="110" cy="80" r="60" stroke="black" stroke-width="1.8" fill="none" />
                 <circle cx="110" cy="110" r="30" stroke="black" stroke-width="1.5" fill="none" />
                 <circle cx="110" cy="80" r="2.5" fill="black" />
-                <text x="115" y="75" font-size="12">O (大圓心)</text>
+                <text x="115" y="75" font-size="12" font-family="sans-serif">O (大圓心)</text>
                 <circle cx="110" cy="110" r="2" fill="black" />
                 <line x1="110" y1="20" x2="110" y2="140" stroke="black" stroke-width="1" stroke-dasharray="3" />
-                <text x="115" y="50" font-size="11" font-weight="bold">大圓直徑 = {d1}cm</text>
+                <text x="115" y="50" font-size="11" font-weight="bold" font-family="sans-serif">大圓直徑 = {d1}cm</text>
+            </svg>
+            </div>
+            """
+            
+        # 🆕 題型四：三角形底與高題 (新增)
+        elif g_type == "triangle":
+            b = params.get("b", "15")
+            h = params.get("h", "10")
+            svg_code = f"""
+            <div class="geo-container" style="text-align:center; margin:15px 0;">
+            <svg width="240" height="150" style="background:white; border:1px solid #ddd; border-radius:6px; display:inline-block;">
+                <polygon points="40,120 200,120 150,30" stroke="black" stroke-width="1.8" fill="none" />
+                <line x1="150" y1="30" x2="150" y2="120" stroke="black" stroke-width="1.2" stroke-dasharray="3" />
+                <rect x="145" y="115" width="5" height="5" stroke="black" stroke-width="1" fill="none" />
+                <text x="100" y="135" font-size="12" font-weight="bold" font-family="sans-serif">底 = {b} cm</text>
+                <text x="160" y="80" font-size="12" font-weight="bold" font-family="sans-serif">高 = {h} cm</text>
+            </svg>
+            </div>
+            """
+
+        # 🆕 題型五：立體等角透視長方體/正方體體積題 (新增)
+        elif g_type == "cuboid_volume":
+            l = params.get("l", "12")
+            w = params.get("w", "8")
+            h = params.get("h", "5")
+            svg_code = f"""
+            <div class="geo-container" style="text-align:center; margin:15px 0;">
+            <svg width="260" height="160" style="background:white; border:1px solid #ddd; border-radius:6px; display:inline-block;">
+                <!-- 長方體前表面 -->
+                <polygon points="40,120 160,120 160,60 40,60" stroke="black" stroke-width="1.8" fill="none" />
+                <!-- 長方體上表面 -->
+                <polygon points="40,60 160,60 210,30 90,30" stroke="black" stroke-width="1.5" fill="none" />
+                <!-- 長方體右側表面 -->
+                <polygon points="160,120 210,90 210,30 160,60" stroke="black" stroke-width="1.8" fill="none" />
+                <!-- 後方看不見的隱藏虛線 -->
+                <line x1="40" y1="120" x2="90" y2="90" stroke="black" stroke-width="1.2" stroke-dasharray="3" />
+                <line x1="90" y1="90" x2="210" y2="90" stroke="black" stroke-width="1.2" stroke-dasharray="3" />
+                <line x1="90" y1="90" x2="90" y2="30" stroke="black" stroke-dasharray="3" stroke-width="1.2" />
+                <!-- 長、闊、高參數標註 -->
+                <text x="80" y="138" font-size="12" font-weight="bold" font-family="sans-serif">長 = {l} cm</text>
+                <text x="185" y="110" font-size="12" font-weight="bold" font-family="sans-serif">闊 = {w} cm</text>
+                <text x="10" y="90" font-size="12" font-weight="bold" font-family="sans-serif">高 = {h} cm</text>
             </svg>
             </div>
             """
@@ -272,38 +340,79 @@ def convert_to_vertical_fractions(text_content):
 def python_layout_engine(raw_text, is_answer_key=False):
     if not raw_text: return ""
     raw_text = raw_text.replace("\\n", "\n").replace("\\\\n", "\n")
-    raw_text = re.sub(r'\s*([○●]\s*[A-D]\.)', r'\n\1', raw_text)
-    raw_text = convert_to_vertical_fractions(raw_text)
+    
+    # 清洗可能存在的 markdown 加粗標籤，便於排版與正則捕獲
+    raw_text = raw_text.replace("**", "").replace("###", "")
     lines = raw_text.split('\n')
     processed_lines = []
+    current_section = ""
     
     for line in lines:
         if not line.strip(): continue
-        clean_line = line.replace("**", "").replace("###", "").strip()
+        clean_line = line.strip()
         
+        # 1. 識別大題目部別與主題 (確保狀態同步更新)
+        if "部：" in clean_line or "部分：" in clean_line or "部" in clean_line or "部分" in clean_line:
+            current_section = clean_line
+            processed_lines.append(f'<div class="exam-section-header">{clean_line}</div>')
+            continue
+            
+        # 2. 識別試卷主副標題
+        if "測驗" in clean_line or "考試" in clean_line or ("試卷" in clean_line and len(clean_line) < 35):
+            processed_lines.append(f'<div class="exam-title-main">{clean_line}</div>')
+            continue
+        if "班級" in clean_line or "姓名" in clean_line or "學號" in clean_line or "班別" in clean_line:
+            processed_lines.append(f'<div class="exam-user-info">{clean_line}</div>')
+            continue
+            
+        # 3. 幾何 SVG 標籤拦截與繪製
         geo_match = re.search(r'(\[GEOMETRIC:[^\]]+\])', line)
         if geo_match:
             full_marker = geo_match.group(1)
             svg_html = draw_svg_geometry(full_marker)
             line = line.replace(full_marker, svg_html)
+            processed_lines.append(f'<div>{line}</div>')
+            continue
+
+        # 4. 🌟 多項選擇題（MC）智慧分流與橫跨分行（徹底拆分 A. B. C. D.）
+        options = re.findall(r'([○●]?\s*[A-D]\.\s*[^A-D○●\n\t]+)', line)
+        first_opt_match = re.search(r'[○●]?\s*A\.', line)
         
+        if first_opt_match and options:
+            idx = first_opt_match.start()
+            question_part = line[:idx].strip()
+            
+            # 如果選項和題目合在同一行，先把題目放出來
+            if question_part:
+                processed_lines.append(f'<div class="question-text">{question_part}</div>')
+            
+            # 依序排列每一個選項至新行
+            for opt in options:
+                opt_str = opt.strip()
+                # 剔除並美化 AI 吐出的答案標註
+                if "●" in opt_str:
+                    opt_str = opt_str.replace("●", "").strip()
+                    processed_lines.append(f'<div class="mc-option"><span class="mc-ans">●</span> {opt_str}</div>')
+                else:
+                    opt_str = opt_str.replace("○", "").strip()
+                    processed_lines.append(f'<div class="mc-option">○ {opt_str}</div>')
+            continue
+
+        # 5. 底線與空括號長度 3 倍美化
         line = re.sub(r'([_＿]{2,})', r'<span class="fill-blank-underline"></span>', line)
         line = re.sub(r'([\(（])\s{2,}([\)）])', r'\1 <span class="fill-blank-underline"></span> \2', line)
+        line = convert_to_vertical_fractions(line)
+
+        # 6. 🌟 智慧判斷是否該產生手寫答題紙 (列式與長題目)
+        is_applied_or_calc_section = any(s in current_section for s in ["第三", "第四", "計算", "應用題", "文字題", "長題目"])
         
-        if "測驗" in clean_line or "考試" in clean_line or ("試卷" in clean_line and len(clean_line) < 35):
-            processed_lines.append(f'<div class="exam-title-main">{clean_line}</div>')
+        # 當前行是以數字加點（如 "31." "42."）開頭，且為非答案頁、在計算/長題目區中
+        if re.match(r'^\d+\.', clean_line) and not is_answer_key and is_applied_or_calc_section:
+            processed_lines.append(f'<div class="question-text">{line}</div>')
+            # 完美追加 4 行高質感虛線答題區
+            processed_lines.append('<div class="write-zone">' + '<div class="row-line"></div>'*4 + '</div>')
             continue
-        if "班級" in clean_line or "姓名" in clean_line or "學號" in clean_line:
-            processed_lines.append(f'<div class="exam-user-info">{clean_line}</div>')
-            continue
-        if "部：" in clean_line or "部分：" in clean_line:
-            processed_lines.append(f'<div class="exam-section-header">{clean_line}</div>')
-            continue
-        if re.search(r'[○●]\s*[A-D]\.', line):
-            if "●" in line: line = line.replace("●", '<span class="mc-ans">●</span>')
-            processed_lines.append(f'<div class="mc-option">{line}</div>')
-            continue
-            
+
         processed_lines.append(f'<div>{line}</div>')
         
     return "\n".join(processed_lines)
@@ -341,7 +450,7 @@ if range_mode == "提供範圍":
         write_to_exam_vault(text_input_val)
         current_vault_ocr = text_input_val
 else:
-    static_notice = "根據平面圓形組合幾何圖形工作紙考點，計算圓心、切點、多圓重疊、長方形內切圓的半徑與直徑關係。"
+    static_notice = "根據平面圓形與幾何圖形工作紙考點，計算圓心、切點、多圓重疊、長方形內切圓、三角形與長方體體積的關係。"
     write_to_exam_vault(static_notice)
     st.text_area("📝 範圍狀態（已鎖定）：", value=static_notice, height=70, disabled=True)
 
@@ -353,19 +462,23 @@ if btn_call_ai:
         st.error("❌ 請至少選擇一種題型的數量大於 0！")
     else:
         final_vault_text = read_from_exam_vault()
+        
+        # 幾何高階自動化偵測 (圓、三角、面積、體積等關鍵字)
         has_geometry = any(kw in final_vault_text for kw in ["圓", "三角", "面積", "體積"])
         
         geo_rule = ""
         if has_geometry:
             geo_rule = """
-            ⚠️ 考量到本範圍涉及幾何，你必須在題目中穿插嵌入幾何圖形標記，絕對不能漏掉。
+            ⚠️【核心幾何命令】：考量到本範圍涉及幾何，你必須在題目中穿插嵌入幾何圖形標記，絕對不能漏掉。
             圖形標記格式必須單獨佔一行：
-            - [GEOMETRIC:three_circles_linear:r1=10;r2=5;r3=7]
-            - [GEOMETRIC:circles_in_rectangle:w=24;h=12]
-            - [GEOMETRIC:concentric_overlap:d1=16]
+            - [GEOMETRIC:three_circles_linear:r1=10;r2=5;r3=7] (用於圓形性質題)
+            - [GEOMETRIC:circles_in_rectangle:w=24;h=12] (用於長方形切圓題)
+            - [GEOMETRIC:concentric_overlap:d1=16] (用於同心重疊圓題)
+            - [GEOMETRIC:triangle:b=15;h=10] (若涉及三角形面積計算)
+            - [GEOMETRIC:cuboid_volume:l=12;w=8;h=5] (若涉及長方體/正方體體積計算)
             """
 
-        # 建立分批任務
+        # 建立分批生成任務
         tasks = []
         if mc_count > 0: tasks.append(("MC", f"第一部分：多項選擇題（共 {mc_count} 題，題號由 1 開始到 {mc_count}）", mc_count))
         if fill_count > 0: tasks.append(("FILL", f"第二部分：填充題（共 {fill_count} 題，題號由 {mc_count+1} 開始到 {mc_count+fill_count}）", fill_count))
@@ -458,7 +571,21 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
         .v-frac {{ display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; line-height: 1.0; padding: 0 4px; font-size: 0.85em; }}
         .v-frac .num {{ border-bottom: 1.5px solid #000; padding-bottom: 2px; min-width: 14px; }}
         .v-frac .den {{ padding-top: 2px; min-width: 14px; }}
-        .mc-option {{ margin-left: 20px; margin-top: 6px; margin-bottom: 6px; display: block !important; }}
+        
+        /* 選擇題每行獨立包裹與對齊 */
+        .mc-option {{ 
+            margin-left: 20px; 
+            margin-top: 6px; 
+            margin-bottom: 6px; 
+            display: block !important; 
+            clear: both;
+        }}
+        .mc-ans {{ color: #ff4b4b; font-weight: bold; }}
+        
+        /* 答題紙橫線區域 */
+        .write-zone {{ margin-top: 15px; margin-bottom: 30px; width: 100%; }}
+        .row-line {{ width: 100%; height: 38px; border-bottom: 1px dashed #999 !important; }}
+        
         .page-break {{ page-break-before: always; }}
     </style>
     </head>
