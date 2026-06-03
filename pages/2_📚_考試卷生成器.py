@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.10.3：終極修復！移除 file_uploader 沖刷快取的 else 陷阱，引入單向快取追加鎖定，確保儲存追加 100% 觸發
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.3"
+# 🆕 升級 v1.10.4：極簡操作版！移除混亂的清除暫存按鈕，加入動態 API 讀寫進度提示，大幅提升大檔案傳輸時的 UX 體驗
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.4"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -93,8 +93,8 @@ def read_from_exam_vault():
     path = get_exam_vault_path()
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
-# 🛠️ GitHub 雲端知識庫 CRUD 強固函數組
-def upload_knowledge_base_to_github(name, b64_images):
+# 🛠️ GitHub 雲端知識庫 CRUD
+def upload_knowledge_base_to_github(name, b64_images, status_ui=None):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', name)
     path = f"knowledge_base/{safe_name}.json"
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref=main"
@@ -104,20 +104,20 @@ def upload_knowledge_base_to_github(name, b64_images):
     }
     
     sha = None
-    add_log("💾 儲存程序啟動：正在向 GitHub 查詢 SHA 標籤...")
+    if status_ui: status_ui.info("⏳ [1/3] 正在與 GitHub 驗證舊檔案狀態...")
+    add_log(f"開始儲存程序：查詢 {name} 是否存在舊檔案...")
+    
     res = requests.get(url, headers=headers)
     if res.status_code == 200:
         sha = res.json().get("sha")
-        add_log(f"✅ 成功撈到舊檔案 SHA: {sha}，將進行覆寫。")
-    else:
-        add_log(f"💡 未找到舊檔案 SHA (狀態碼: {res.status_code})，將建立全新檔案。")
-        
+        add_log(f"找到舊檔案 SHA: {sha}，將進行覆寫更新。")
+    
+    if status_ui: status_ui.info("⏳ [2/3] 正在將圖片編碼為大檔案 JSON 格式...")
     payload_data = {
         "kb_name": name,
         "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "images": b64_images
     }
-    
     content_str = json.dumps(payload_data, indent=2)
     content_b64 = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
     
@@ -126,18 +126,21 @@ def upload_knowledge_base_to_github(name, b64_images):
         "content": content_b64,
         "branch": "main"
     }
-    if sha:
-        put_payload["sha"] = sha
+    if sha: put_payload["sha"] = sha
         
     write_url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
-    add_log(f"🚀 推送 JSON 到雲端，總共上傳圖片張數：{len(b64_images)} 張")
+    
+    if status_ui: status_ui.info("🚀 [3/3] 正在上傳至 GitHub 雲端，大檔案傳輸約需 3-5 秒，請稍候...")
+    add_log(f"推送大數據至雲端，總張數：{len(b64_images)}")
+    
     put_res = requests.put(write_url, headers=headers, json=put_payload)
     
-    add_log(f"🔔 GitHub 伺服器回應狀態碼: {put_res.status_code}")
-    if put_res.status_code not in [200, 201]:
-        add_log(f"❌ 儲存失敗！詳細錯誤原因：{put_res.text}")
-        
-    return put_res.status_code in [200, 201]
+    if put_res.status_code in [200, 201]:
+        add_log(f"✅ 成功！狀態碼: {put_res.status_code}")
+        return True
+    else:
+        add_log(f"❌ 儲存失敗！錯誤碼 {put_res.status_code}: {put_res.text}")
+        return False
 
 def delete_knowledge_base_from_github(name):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', name)
@@ -173,24 +176,27 @@ def list_knowledge_bases_from_github():
         pass
     return []
 
-def get_knowledge_base_content(kb_name):
+def get_knowledge_base_content(kb_name, status_ui=None):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', kb_name)
     raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/knowledge_base/{safe_name}.json"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}"
     }
-    add_log(f"🚀 開啟大檔案 Raw 綠色通道抓取數據: {raw_url}")
+    
+    if status_ui: status_ui.info("⏳ 正在由 GitHub 高速通道下載大檔案資料，請稍候...")
+    add_log(f"啟動大檔案抓取: {raw_url}")
+    
     try:
         res = requests.get(raw_url, headers=headers)
-        add_log(f"遠端 Raw 通道回應狀態碼: {res.status_code}")
         if res.status_code == 200:
             parsed_data = res.json()
-            add_log(f"🎉 原始資料加載成功！知識庫名稱: {parsed_data.get('kb_name')}, 內含圖片張數: {len(parsed_data.get('images', []))}")
+            add_log(f"🎉 讀取成功！共 {len(parsed_data.get('images', []))} 張圖。")
+            if status_ui: status_ui.empty() # 清除提示
             return parsed_data
         else:
-            add_log(f"❌ Raw 通道讀取失敗。狀態碼: {res.status_code}, 錯誤: {res.text}")
+            add_log(f"❌ 讀取失敗。狀態碼: {res.status_code}")
     except Exception as ex:
-        add_log(f"❌ 發生異常崩潰: {str(ex)}")
+        add_log(f"❌ 發生異常: {str(ex)}")
     return None
 
 def ensure_flat_string(val):
@@ -619,11 +625,14 @@ with tab_exam:
         components.html(html_for_printing, height=1200, scrolling=True)
 
 # ------------------------------------------
-# TAB 2: 雲端多圖知識庫管理 (v1.10.3 鎖定緩衝版)
+# TAB 2: 雲端多圖知識庫管理 (v1.10.4 即時進度 UX 升級版)
 # ------------------------------------------
 with tab_kb:
     st.header("📂 雲端課文/作業/工作紙知識庫管理")
     st.info("💡 你可以在這裡建立、追加修改或徹底刪除雲端檔案儲存庫，上傳的檔案將會永久保存。")
+    
+    # 預留一個動態提示空間給讀取和寫入時顯示進度
+    loading_status_box = st.empty()
     
     kb_action = st.radio("⚙️ 請選擇操作模式：", ["🆕 建立全新知識庫", "✏️ 編輯 / 追加現有知識庫"], horizontal=True, key="kb_action_radio")
     current_kb_name = ""
@@ -644,18 +653,20 @@ with tab_kb:
             with col_del:
                 if selected_edit_kb:
                     if st.button(f"🗑️ 徹底刪除整個「{selected_edit_kb}」", type="primary", use_container_width=True, key="del_entire_kb_btn"):
+                        loading_status_box.info("⏳ 正在由 GitHub 徹底刪除知識庫...")
                         if delete_knowledge_base_from_github(selected_edit_kb):
                             st.success(f"🔥 雲端知識庫「{selected_edit_kb}」已徹底抹除！")
                             st.session_state['last_loaded_kb'] = ""
                             st.session_state['kb_current_b64_list'] = []
-                            time.sleep(0.5)
+                            time.sleep(1.0)
                             st.rerun()
 
             if selected_edit_kb:
                 current_kb_name = selected_edit_kb
                 if st.session_state['last_loaded_kb'] != selected_edit_kb:
                     add_log(f"🔄 偵測到選擇切換。開始抓取雲端知識庫：【{selected_edit_kb}】")
-                    kb_payload = get_knowledge_base_content(selected_edit_kb)
+                    # 傳入 status_box 顯示動態進度
+                    kb_payload = get_knowledge_base_content(selected_edit_kb, status_ui=loading_status_box)
                     if kb_payload:
                         st.session_state['kb_current_b64_list'] = kb_payload.get("images", [])
                         st.session_state['last_loaded_kb'] = selected_edit_kb
@@ -674,8 +685,9 @@ with tab_kb:
                             clean_src = clean_pure_b64 if clean_pure_b64.startswith("data:image") else f"data:image/jpeg;base64,{clean_pure_b64}"
                             try:
                                 st.image(clean_src, use_container_width=True)
-                                if st.checkbox("❌ 刪除此檔案", key=f"del_img_check_{img_idx}"):
-                                    st.caption("⚠️ 已剔除")
+                                # 💡 UX 優化：將刪除文字寫得更明確，讓用家知道要按儲存才生效
+                                if st.checkbox("❌ 標記為刪除 (儲存後生效)", key=f"del_img_check_{img_idx}"):
+                                    st.error("⚠️ 已標記，儲存後正式剔除")
                                 else:
                                     keep_images.append(b64_data)
                             except Exception:
@@ -691,62 +703,57 @@ with tab_kb:
         current_kb_name = st.text_input("📝 請輸入全新知識庫名稱：", value="", key="new_kb_name_input")
         st.session_state['kb_current_b64_list'] = []
     
-    # 💥【單向追加鎖定核心】
-    uploaded_files = st.file_uploader("📸 請選擇或拖放上傳檔案：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="kb_file_uploader")
-    
+    uploaded_files = st.file_uploader("📸 請選擇或拖放上傳檔案 (如需取消請按檔名旁邊的 X)：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="kb_file_uploader")
     if uploaded_files:
         for f in uploaded_files:
             f_bytes = f.read()
             b64_str = base64.b64encode(f_bytes).decode("utf-8")
             clean_new_b64 = re.sub(r'\s+', '', b64_str)
-            # 🌟 單向點對點安全追加進快取，即使重新整理亦絕不被 Else 清空！
             if clean_new_b64 not in st.session_state['new_uploaded_cache']:
                 st.session_state['new_uploaded_cache'].append(clean_new_b64)
-                add_log(f"📥 暫存鎖定成功：新圖片 ({len(clean_new_b64)} 字元) 已安全追加至記憶體。")
+                add_log(f"📥 檔案追加至快取成功")
 
-    # 顯示目前已累計追加嘅新相片數量與即時預覽
     if st.session_state['new_uploaded_cache']:
-        col_info1, col_info2 = st.columns([4, 1])
-        with col_info1:
-            st.markdown(f"#### 🔍 準備追加的新相片預覽（目前已累計：{len(st.session_state['new_uploaded_cache'])} 張）")
-        with col_info2:
-            if st.button("🧹 清除新相片暫存", use_container_width=True):
-                st.session_state['new_uploaded_cache'] = []
-                st.rerun()
-                
+        st.markdown(f"#### 🔍 準備追加的新相片預覽（目前已累計：{len(st.session_state['new_uploaded_cache'])} 張）")
         preview_cols = st.columns(5)
         for f_idx, b64_str in enumerate(st.session_state['new_uploaded_cache']):
             clean_new_src = b64_str if b64_str.startswith("data:image") else f"data:image/jpeg;base64,{b64_str}"
             with preview_cols[f_idx % 5]:
                 st.image(clean_new_src, use_container_width=True, caption=f"準備追加第 {f_idx+1} 張")
 
+    # 💾 動態儲存按鈕處理區
     st.write("##")
+    save_status_box = st.empty() # 專門顯示儲存進度的 Box
+    
     if st.button("💾 儲存並同步至雲端知識庫", type="primary", use_container_width=True, key="save_kb_final_btn"):
         if not current_kb_name.strip():
             st.error("❌ 請輸入或選擇有效的知識庫名稱！")
         else:
-            # 完美合併：保留的舊圖 + 完美鎖定住的新追加圖
             total_images = st.session_state['kb_current_b64_list'] + st.session_state['new_uploaded_cache']
-            add_log(f"按鈕觸發：準備打包寫入雲端。目前保留舊圖：{len(st.session_state['kb_current_b64_list'])} 張，新追加圖：{len(st.session_state['new_uploaded_cache'])} 張，總計：{len(total_images)} 張")
             
             if not total_images:
                 st.error("❌ 知識庫內不能沒有任何有效檔案！")
             else:
-                with st.spinner("正在安全編碼並上傳同步至 GitHub 雲端..."):
-                    success = upload_knowledge_base_to_github(current_kb_name.strip(), total_images)
-                    if success:
-                        st.success(f"🎉 雲端知識庫「{current_kb_name}」已成功保存並更新！正在清理本機快取...")
-                        st.session_state['kb_current_b64_list'] = []
-                        st.session_state['new_uploaded_cache'] = []
-                        st.session_state['last_loaded_kb'] = ""
-                        time.sleep(1.0)
-                        st.rerun()
-                    else:
-                        st.error("❌ 同步失敗！請立刻查看下方黃色偵錯面板獲取 GitHub API 的具體拒絕原因。")
+                # 💡 UX 優化：即時回饋開始儲存，令按鈕不會感覺無反應
+                save_status_box.info("🚀 開始啟動儲存程序，請稍候...")
+                
+                success = upload_knowledge_base_to_github(current_kb_name.strip(), total_images, status_ui=save_status_box)
+                
+                if success:
+                    save_status_box.success(f"🎉 儲存成功！雲端知識庫「{current_kb_name}」已更新 (共 {len(total_images)} 張圖)。網頁即將重新整理...")
+                    st.toast("🎉 雲端知識庫儲存成功！", icon="✅")
+                    
+                    st.session_state['kb_current_b64_list'] = []
+                    st.session_state['new_uploaded_cache'] = []
+                    st.session_state['last_loaded_kb'] = ""
+                    time.sleep(1.5) # 畀時間用家睇到成功訊息再 rerun
+                    st.rerun()
+                else:
+                    save_status_box.error("❌ 同步失敗！請立刻查看下方黃色偵錯面板獲取 GitHub API 的具體拒絕原因。")
 
     # 日誌面板
     st.write("##")
-    with st.expander("🛠️ 系統後台偵錯日誌面板 (Debug Logs)", expanded=True):
+    with st.expander("🛠️ 系統後台偵錯日誌面板 (Debug Logs)", expanded=False):
         if st.session_state['debug_logs']:
             log_text = "\n".join(st.session_state['debug_logs'][::-1])
             st.text_area("即時系統軌跡日誌：", value=log_text, height=200, key="system_debug_logs_view")
