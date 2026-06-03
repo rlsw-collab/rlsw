@@ -86,7 +86,7 @@ cards_html = (
 st.markdown(cards_html, unsafe_allow_html=True)
 
 # ==========================================
-# 4. 📊 實時計數器與進度條區塊 (全新動態自動感應排版)
+# 4. 📊 實時計數器與進度條區塊 (全面強化防錯機制)
 # ==========================================
 st.write("##")
 st.markdown("""
@@ -103,8 +103,11 @@ MODEL_LIMITS = {
 }
 DEFAULT_LIMIT = 25
 
-# 過濾掉日期欄位，只留下真實模型數據
-model_counts = {k: v for k, v in counter.items() if k != "last_reset_date"}
+# 🌟 嚴格過濾：只篩選出值為「整數數字」的模型欄位，防止字串相除崩潰
+model_counts = {}
+for k, v in counter.items():
+    if k != "last_reset_date" and (isinstance(v, int) or isinstance(v, float)):
+        model_counts[k] = v
 
 if not model_counts:
     st.info("💡 今日暫時未有 AI 模型調用記錄。開始使用工具後將在此實時顯示。")
