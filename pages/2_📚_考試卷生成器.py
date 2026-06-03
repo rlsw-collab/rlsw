@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.10.5：終極整合版 UX！統一新舊檔案工作區、加入載入按鈕、全局重置引擎，儲存後完美還原初始狀態
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.5"
+# 🆕 升級 v1.10.6：終極穿透快取版！加入時間戳 Cache Busting 引擎，強制穿透 GitHub CDN 的 5 分鐘快取，實現 0 延遲秒速載入最新檔案！
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.6"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -97,10 +97,13 @@ def read_from_exam_vault():
 def upload_knowledge_base_to_github(name, b64_images, status_ui=None):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', name)
     path = f"knowledge_base/{safe_name}.json"
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref=main"
+    
+    # 加入時間戳強制不抓快取
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref=main&t={int(time.time())}"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
+        "Accept": "application/vnd.github.v3+json",
+        "Cache-Control": "no-cache"
     }
     
     sha = None
@@ -145,10 +148,11 @@ def upload_knowledge_base_to_github(name, b64_images, status_ui=None):
 def delete_knowledge_base_from_github(name):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', name)
     path = f"knowledge_base/{safe_name}.json"
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref=main"
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref=main&t={int(time.time())}"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
+        "Accept": "application/vnd.github.v3+json",
+        "Cache-Control": "no-cache"
     }
     res = requests.get(url, headers=headers)
     if res.status_code == 200:
@@ -163,10 +167,12 @@ def delete_knowledge_base_from_github(name):
     return False
 
 def list_knowledge_bases_from_github():
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/knowledge_base?ref=main"
+    # 🌟 穿透 1: 目錄列表防止快取
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/knowledge_base?ref=main&t={int(time.time())}"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
+        "Accept": "application/vnd.github.v3+json",
+        "Cache-Control": "no-cache"
     }
     try:
         res = requests.get(url, headers=headers)
@@ -178,19 +184,21 @@ def list_knowledge_bases_from_github():
 
 def get_knowledge_base_content(kb_name, status_ui=None):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', kb_name)
-    raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/knowledge_base/{safe_name}.json"
+    # 🌟 穿透 2: 大檔案下載防止快取，追加動態 Timestamp
+    raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/knowledge_base/{safe_name}.json?t={int(time.time())}"
     headers = {
-        "Authorization": f"token {GITHUB_TOKEN}"
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Cache-Control": "no-cache"
     }
     
-    if status_ui: status_ui.info("⏳ 正在由 GitHub 高速通道下載大檔案資料，請稍候...")
-    add_log(f"啟動大檔案抓取: {raw_url}")
+    if status_ui: status_ui.info("⏳ 正在由 GitHub 高速通道下載最新大檔案資料，請稍候...")
+    add_log(f"啟動穿透快取大檔案抓取: {raw_url}")
     
     try:
         res = requests.get(raw_url, headers=headers)
         if res.status_code == 200:
             parsed_data = res.json()
-            add_log(f"🎉 讀取成功！共 {len(parsed_data.get('images', []))} 張圖。")
+            add_log(f"🎉 新鮮讀取成功！共 {len(parsed_data.get('images', []))} 張圖。")
             if status_ui: status_ui.empty() 
             return parsed_data
         else:
@@ -633,7 +641,7 @@ with tab_exam:
         components.html(html_for_printing, height=1200, scrolling=True)
 
 # ------------------------------------------
-# TAB 2: 雲端多圖知識庫管理 (v1.10.5 終極整合無縫版)
+# TAB 2: 雲端多圖知識庫管理
 # ------------------------------------------
 with tab_kb:
     st.header("📂 雲端課文/作業/工作紙知識庫管理")
@@ -645,7 +653,7 @@ with tab_kb:
         kb_action = st.radio("⚙️ 請選擇操作模式：", ["🆕 建立全新知識庫", "✏️ 編輯 / 追加現有知識庫"], horizontal=True)
         if kb_action != st.session_state['prev_action']:
             st.session_state['prev_action'] = kb_action
-            reset_kb_state() # 切換模式時自動還原乾淨狀態
+            reset_kb_state() 
             st.rerun()
             
     with col_reset:
@@ -655,7 +663,6 @@ with tab_kb:
             
     st.write("---")
     
-    # 🌟 動態工作區顯示控制邏輯
     show_workspace = False
 
     if kb_action == "🆕 建立全新知識庫":
@@ -674,13 +681,13 @@ with tab_kb:
             with col_sel:
                 selected_edit_kb = st.selectbox("請選擇要讀取的雲端知識庫：", cloud_lists, key="tab2_edit_kb_selector")
             with col_load:
-                if st.button("📥 載入", use_container_width=True):
+                if st.button("📥 載入最新版", use_container_width=True):
                     loading_status_box = st.empty()
                     kb_payload = get_knowledge_base_content(selected_edit_kb, status_ui=loading_status_box)
                     if kb_payload:
                         st.session_state['working_images'] = kb_payload.get("images", [])
                         st.session_state['working_kb_name'] = selected_edit_kb
-                        st.success(f"🎉 已成功載入「{selected_edit_kb}」！現在你可以追加或刪減檔案。")
+                        st.success(f"🎉 已成功秒速載入最新版「{selected_edit_kb}」！現在你可以追加或刪減檔案。")
                         time.sleep(0.8)
                         st.rerun()
             with col_del:
@@ -698,14 +705,13 @@ with tab_kb:
                 st.info(f"✏️ 當前正在編輯知識庫：**{st.session_state['working_kb_name']}**")
                 show_workspace = True
             else:
-                st.warning("💡 請先選擇上方的知識庫並按下「📥 載入」按鈕。")
+                st.warning("💡 請先選擇上方的知識庫並按下「📥 載入最新版」按鈕。")
 
     # 🌟 終極統一上傳與管理工作區
     if show_workspace:
         st.write("---")
         st.markdown("### 📥 上傳與檔案管理區")
         
-        # 1. 拖拉上傳區域 (與快取無縫接軌)
         uploaded_files = st.file_uploader("📸 請選擇或拖放上傳新檔案...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key=f"kb_uploader_{st.session_state['uploader_key_counter']}")
         if uploaded_files:
             new_added = False
@@ -718,7 +724,6 @@ with tab_kb:
             if new_added:
                 add_log(f"📥 成功追加新檔案。目前總張數：{len(st.session_state['working_images'])}")
 
-        # 2. 全局整合預覽 Grid (包含舊載入與新上傳)
         if st.session_state['working_images']:
             st.markdown(f"#### 🔍 檔案預覽與管理（共 {len(st.session_state['working_images'])} 張）")
             cols = st.columns(4)
@@ -726,12 +731,10 @@ with tab_kb:
                 with cols[i % 4]:
                     clean_src = b64_data if b64_data.startswith("data:image") else f"data:image/jpeg;base64,{b64_data}"
                     st.image(clean_src, use_container_width=True)
-                    # 💡 UX 優化：直接移除該張圖片並即時重整網頁反映結果
                     if st.button("❌ 刪除", key=f"del_img_btn_{i}"):
                         st.session_state['working_images'].pop(i)
                         st.rerun()
 
-        # 3. 💾 動態儲存按鈕處理區
         st.write("##")
         save_status_box = st.empty()
         
@@ -748,12 +751,12 @@ with tab_kb:
                     save_status_box.success("🎉 儲存成功！網頁即將洗淨並重置為初始狀態...")
                     st.toast("🎉 雲端知識庫儲存成功！", icon="✅")
                     time.sleep(1.5)
-                    reset_kb_state() # 儲存完畢後全自動重置
+                    reset_kb_state()
                     st.rerun()
                 else:
                     save_status_box.error("❌ 同步失敗！請立刻查看下方黃色偵錯面板獲取 GitHub API 的具體拒絕原因。")
 
-    # 4. 日誌面板
+    # 日誌面板
     st.write("##")
     with st.expander("🛠️ 系統後台偵錯日誌面板 (Debug Logs)", expanded=False):
         if st.session_state['debug_logs']:
