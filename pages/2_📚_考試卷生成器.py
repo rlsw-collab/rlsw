@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.9.1：移除強制懸浮置頂，回歸自然網頁流，確保標題完美待在 Tabs 上方不擋畫面
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.9.1"
+# 🆕 升級 v1.9.2：去iPad化、支援檔案即時預覽、對接 GitHub 實現知識庫的增、刪、改、單張圖片清理功能
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.9.2"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -44,7 +44,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 採用標準的 st.title，確保永遠自然排在最頂部
 st.title(APP_TITLE)
 
 if 'authenticated' not in st.session_state:
@@ -68,7 +67,7 @@ if not st.session_state['authenticated']:
 try:
     GITHUB_TOKEN = st.secrets["GIT_TOKEN"]
     GEMINI_TOKEN = st.secrets["GEMINI_TOKEN"]
-    AI_TOKEN = st.secrets.get("AI_TOKEN", "") # GitHub 免費 Models 綠色通道 Key
+    AI_TOKEN = st.secrets.get("AI_TOKEN", "")
     GITHUB_REPO = "rlsw"
     GITHUB_USER = "rlsw-collab"
 except Exception as e:
@@ -89,7 +88,7 @@ def read_from_exam_vault():
     path = get_exam_vault_path()
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
-# 🛠️ GitHub 雲端知識庫讀寫函數組
+# 🛠️ GitHub 雲端知識庫 CRUD 函數組
 def upload_knowledge_base_to_github(name, b64_images):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', name)
     path = f"knowledge_base/{safe_name}.json"
@@ -106,7 +105,7 @@ def upload_knowledge_base_to_github(name, b64_images):
         
     payload_data = {
         "kb_name": name,
-        "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "updated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "images": b64_images
     }
     
@@ -114,7 +113,7 @@ def upload_knowledge_base_to_github(name, b64_images):
     content_b64 = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
     
     put_payload = {
-        "message": f"Upload knowledge base: {name} [skip ci]",
+        "message": f"Save knowledge base: {name} [skip ci]",
         "content": content_b64
     }
     if sha:
@@ -122,6 +121,25 @@ def upload_knowledge_base_to_github(name, b64_images):
         
     put_res = requests.put(url, headers=headers, json=put_payload)
     return put_res.status_code in [200, 201]
+
+def delete_knowledge_base_from_github(name):
+    safe_name = re.sub(r'[\\/*?:"<>| ]', '_', name)
+    path = f"knowledge_base/{safe_name}.json"
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    res = requests.get(url, headers=headers)
+    if res.status_code == 200:
+        sha = res.json().get("sha")
+        delete_payload = {
+            "message": f"Delete knowledge base: {name} [skip ci]",
+            "sha": sha
+        }
+        del_res = requests.delete(url, headers=headers, json=delete_payload)
+        return del_res.status_code == 200
+    return False
 
 def list_knowledge_bases_from_github():
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/knowledge_base"
@@ -145,7 +163,7 @@ def get_knowledge_base_content(kb_name):
         "Accept": "application/vnd.github.v3+json"
     }
     try:
-        res =requests.get(url, headers=headers)
+        res = requests.get(url, headers=headers)
         if res.status_code == 200:
             content = base64.b64decode(res.json()["content"]).decode("utf-8")
             return json.loads(content)
@@ -391,7 +409,6 @@ def python_layout_engine(raw_text, is_answer_key=False):
 # ==========================================
 # 🏠 Streamlit 分頁標籤 (TAB 佈局)
 # ==========================================
-# Tabs 直接緊跟在 st.title 標題正下方，結構乾淨自然
 tab_exam, tab_kb = st.tabs(["📝 試卷生成工具", "📂 雲端多圖知識庫管理"])
 
 # ------------------------------------------
@@ -437,11 +454,11 @@ with tab_exam:
             st.warning("⚠️ 目前雲端沒有存放任何知識庫，請先到右側「📂 雲端多圖知識庫管理」上傳。")
             final_vault_text = ""
         else:
-            selected_kb = st.selectbox("📂 選擇你要對接的知識庫資料：", available_kbs)
+            selected_kb = st.selectbox("📂 選擇你要對接的知識庫資料：", available_kbs, key="tab1_kb_selector")
             if selected_kb:
                 kb_data = get_knowledge_base_content(selected_kb)
                 if kb_data:
-                    st.success(f"✅ 已成功加載知識庫「{selected_kb}」，內含 {len(kb_data.get('images', []))} 張課本/工作紙圖片。")
+                    st.success(f"✅ 已成功加載知識庫「{selected_kb}」，內含 {len(kb_data.get('images', []))} 張課本/工作紙檔案圖片。")
                     chosen_kb_images = kb_data.get('images', [])
                     final_vault_text = f"[使用雲端 GitHub 知識庫圖片庫: {selected_kb}]"
 
@@ -461,7 +478,7 @@ with tab_exam:
                     {"role": "system", "content": "You are a professional curriculum analyzer. Your task is to analyze multiple images from textbooks/worksheets and synthesize them into a highly concise but detailed blueprint of knowledge points, core concepts, formulas, and common exercise patterns for test item generation. Output purely in Chinese if requested, or English."}
                 ]
                 
-                user_content = [{"type": "text", "text": "請深度分析這批由學生 iPad 拍攝上傳的工作紙與課本內容。提煉出裡面所有的考點、題型結構、幾何數字邏輯與公式，為稍後的出題做最萬全的知識儲備基礎。"}]
+                user_content = [{"type": "text", "text": "請深度分析這批由用戶上傳的工作紙與課本內容。提煉出裡面所有的考點、題型結構、幾何數字邏輯與公式，為稍後的出題做最萬全的知識儲備基礎。"}]
                 for b64_img in chosen_kb_images:
                     user_content.append({
                         "type": "image_url",
@@ -607,7 +624,7 @@ with tab_exam:
         def on_ans_change(): st.session_state['generated_answers'] = st.session_state['ans_text_editor']
         st.text_area("答案與詳解微調：" if language == "繁體中文" else "Edit Answer Key:", value=st.session_state['ans_text_editor'], height=350, key="ans_text_editor", on_change=on_ans_change)
 
-    # 排版與 iPad 導出
+    # 排版與打印導出
     st.write("---")
     st.header("🎨 步驟四：印刷級幾何排版與打印導出" if language == "繁體中文" else "🎨 Step 4: Print-ready Layout & Export")
 
@@ -663,33 +680,91 @@ with tab_exam:
         components.html(html_for_printing, height=1200, scrolling=True)
 
 # ------------------------------------------
-# TAB 2: 雲端多圖知識庫管理
+# TAB 2: 雲端多圖知識庫管理 (全新升級升級)
 # ------------------------------------------
 with tab_kb:
-    st.header("📂 iPad 雲端課文/作業/工作紙知識庫上傳")
-    st.info("💡 你可以在這裡上傳多張由 iPad 拍攝的課文或工作紙相片，打包儲存至 GitHub，日後即可在生成考卷時直接調用！")
+    st.header("📂 雲端課文/作業/工作紙知識庫管理")
+    st.info("💡 你可以在這裡建立、追加修改或徹底刪除雲端檔案儲存庫，上傳的檔案將會永久保存。")
     
-    uploaded_files = st.file_uploader("📸 請選擇或拖放上傳相片：", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+    # 增加管理模式：新建庫 vs 編輯現有庫
+    kb_action = st.radio("⚙️ 請選擇操作模式：", ["🆕 建立全新知識庫", "✏️ 編輯 / 追加現有知識庫"], horizontal=True)
     
-    if uploaded_files:
-        st.success(f"📎 已加載 {len(uploaded_files)} 個相片檔案。")
-        kb_name_input = st.text_input("📝 請為這組資料庫命名（例如：小六常識第二單元、小五數學圓形面積）：", value="")
-        
-        if st.button("💾 打包並上傳至雲端儲存庫", type="primary", use_container_width=True):
-            if not kb_name_input.strip():
-                st.error("❌ 請輸入此資料組的儲存名稱！")
-            else:
-                with st.spinner("正在將 iPad 相片安全編碼並同步至 GitHub 雲端..."):
-                    b64_list = []
-                    for f in uploaded_files:
-                        f_bytes = f.read()
-                        b64_str = base64.b64encode(f_bytes).decode("utf-8")
-                        b64_list.append(b64_str)
+    current_kb_name = ""
+    existing_images = []
+    
+    if kb_action == "✏️ 編輯 / 追加現有知識庫":
+        cloud_lists = list_knowledge_bases_from_github()
+        if not cloud_lists:
+            st.warning("⚠️ 目前雲端沒有任何知識庫，已為你自動切換為新建模式。")
+            kb_action = "🆕 建立全新知識庫"
+        else:
+            selected_edit_kb = st.selectbox("📁 請選擇要加載修正的雲端知識庫：", cloud_lists)
+            if selected_edit_kb:
+                current_kb_name = selected_edit_kb
+                kb_payload = get_knowledge_base_content(selected_edit_kb)
+                if kb_payload:
+                    existing_images = kb_payload.get("images", [])
+                    st.success(f"📂 已成功從雲端載入「{selected_edit_kb}」，當前庫內共有 {len(existing_images)} 張存檔檔案。")
                     
-                    success = upload_knowledge_base_to_github(kb_name_input.strip(), b64_list)
+                    # 🔴 刪除整個知識庫按鈕
+                    st.write("##")
+                    if st.button(f"🗑️ 徹底刪除整個「{selected_edit_kb}」知識庫", type="secondary"):
+                        if delete_knowledge_base_from_github(selected_edit_kb):
+                            st.success(f"🔥 雲端知識庫「{selected_edit_kb}」已徹底抹除！")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error("❌ 刪除失敗，請檢查權限。")
+                            
+                    # 展示當前圖片，並支援單張「刪除」
+                    st.write("---")
+                    st.markdown("### 🖼️ 當前雲端已存檔案預覽與管理（可點擊減去圖片）：")
+                    cols = st.columns(4)
+                    keep_images = []
+                    for img_idx, b64_data in enumerate(existing_images):
+                        with cols[img_idx % 4]:
+                            st.image(f"data:image/jpeg;base64,{b64_data}", use_container_width=True)
+                            if st.checkbox("刪除此檔案", key=f"del_img_{img_idx}"):
+                                pass # 選中就不放進 keep_images
+                            else:
+                                keep_images.append(b64_data)
+                    existing_images = keep_images
+
+    st.write("---")
+    st.markdown("### 📥 上傳與追加新檔案" if kb_action == "✏️ 編輯 / 追加現有知識庫" else "### 📥 建立全新檔案資料庫")
+    
+    if kb_action == "🆕 建立全新知識庫":
+        current_kb_name = st.text_input("📝 請輸入全新知識庫名稱（例如：小六常識第二單元、小五數學圓形面積）：", value="")
+    
+    # 核心檔案上傳器
+    uploaded_files = st.file_uploader("📸 請選擇或拖放上傳檔案：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="kb_file_uploader")
+    
+    new_b64_list = []
+    if uploaded_files:
+        st.markdown("#### 🔍 新上傳檔案即時預覽：")
+        preview_cols = st.columns(5)
+        for f_idx, f in enumerate(uploaded_files):
+            f_bytes = f.read()
+            b64_str = base64.b64encode(f_bytes).decode("utf-8")
+            new_b64_list.append(b64_str)
+            with preview_cols[f_idx % 5]:
+                st.image(f_bytes, use_container_width=True, caption=f"新檔案 {f_idx+1}")
+
+    # 保存按鈕
+    if st.button("💾 儲存並同步至雲端知識庫", type="primary", use_container_width=True):
+        if not current_kb_name.strip():
+            st.error("❌ 請輸入或選擇有效的知識庫名稱！")
+        else:
+            # 整合舊有保留的圖片與新上傳的圖片
+            total_images = existing_images + new_b64_list
+            if not total_images:
+                st.error("❌ 知識庫內不能沒有任何有效檔案！")
+            else:
+                with st.spinner("正在安全編碼並上傳同步至 GitHub 雲端..."):
+                    success = upload_knowledge_base_to_github(current_kb_name.strip(), total_images)
                     if success:
-                        st.success(f"🎉 資料庫「{kb_name_input}」已完美同步到 GitHub！日後可在 Tab 1 步驟二中直接讀取調用。")
+                        st.success(f"🎉 雲端知識庫「{current_kb_name}」已成功保存並更新！")
                         time.sleep(1)
                         st.rerun()
                     else:
-                        st.error("❌ 上傳失敗，請確認你的 GitHub Key 權限與倉庫配置是否正確。")
+                        st.error("❌ 同步失敗，請確認 GitHub Secrets 設定。")
