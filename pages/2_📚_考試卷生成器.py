@@ -1,7 +1,6 @@
 import streamlit as st
 import requests
 import json
-import base64
 import time
 import re
 import os
@@ -94,54 +93,6 @@ def read_from_exam_vault():
     path = get_exam_vault_path()
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
-# ==========================================
-# 🛡️ GitHub 雲端實時計數同步邏輯
-# ==========================================
-def get_hkt_date_str():
-    tz_hkt = datetime.timezone(datetime.timedelta(hours=8))
-    return datetime.datetime.now(tz_hkt).strftime("%Y-%m-%d")
-
-def increment_github_counter(counter_type):
-    path = "usage_counter.json"
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    today_str = get_hkt_date_str()
-    default_counter = {
-        "last_reset_date": today_str,
-        "exam_tool": {"main": 0, "backup": 0},
-        "dictation_tool": {"main": 0, "backup": 0}
-    }
-    for attempt in range(3):
-        try:
-            res = requests.get(url, headers=headers)
-            if res.status_code == 200:
-                data = res.json()
-                content = base64.b64decode(data["content"]).decode("utf-8")
-                counter = json.loads(content)
-                sha = data["sha"]
-            else:
-                counter = default_counter
-                sha = None
-            if "exam_tool" not in counter: counter["exam_tool"] = {"main": 0, "backup": 0}
-            if counter.get("last_reset_date") != today_str:
-                counter["last_reset_date"] = today_str
-                counter["exam_tool"] = {"main": 0, "backup": 0}
-            counter["exam_tool"][counter_type] += 1
-            content_str = json.dumps(counter, indent=2)
-            content_b64 = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
-            payload = {"message": f"Increment exam {counter_type} counter [skip ci]", "content": content_b64}
-            if sha: payload["sha"] = sha
-            put_res = requests.put(url, headers=headers, json=payload)
-            if put_res.status_code in [200, 201]:
-                st.toast(f"📊 今日已用「{counter_type}」：{counter['exam_tool'][counter_type]} 次", icon="📝")
-                break
-            time.sleep(0.5)
-        except:
-            time.sleep(0.5)
-
 def ensure_flat_string(val):
     if val is None: return ""
     if isinstance(val, str): return val
@@ -182,7 +133,6 @@ def call_pure_free_multiverse_ai(text_prompt):
                 raw_content = res.json()['choices'][0]['message']['content'].strip()
                 raw_content = re.sub(r'^```json\s*', '', raw_content)
                 raw_content = re.sub(r'\s*```$', '', raw_content).strip()
-                increment_github_counter("backup")
                 return json.loads(raw_content)
         except Exception as e:
             pass
@@ -199,7 +149,6 @@ def do_gemini_ocr_with_fallback(b64_list, gemini_token):
         try:
             res = requests.post(api_url, headers={"Content-Type": "application/json"}, json=payload, timeout=40)
             if res.status_code == 200:
-                increment_github_counter("main")
                 return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
         except: continue
     return "❌ 圖片辨識失敗，請稍候重試或手動輸入。"
