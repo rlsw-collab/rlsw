@@ -337,7 +337,6 @@ if 'generated_exam' not in st.session_state: st.session_state['generated_exam'] 
 if 'generated_answers' not in st.session_state: st.session_state['generated_answers'] = ""
 
 current_vault_ocr = read_from_exam_vault()
-vault_hash = str(len(current_vault_ocr)) + "_" + str(hash(current_vault_ocr))
 
 st.header("📋 步驟一：基本資料與功能設定")
 col_meta1, col_meta2 = st.columns(2)
@@ -354,17 +353,10 @@ with col_s4: text_count = st.slider("長題目文字題", 0, 30, 0, step=5)
 
 st.write("---")
 st.header("🎯 步驟二：設定出題範圍來源")
-range_mode = st.radio("範圍模式選擇：", ["提供範圍", "提供幾何工作紙模板"], horizontal=True)
-
-if range_mode == "提供範圍":
-    text_input_val = st.text_area("📝 在此修改或輸入幾何範圍核心概念：", value=current_vault_ocr, height=150, key=f"ocr_box_{vault_hash}")
-    if text_input_val != current_vault_ocr:
-        write_to_exam_vault(text_input_val)
-        current_vault_ocr = text_input_val
-else:
-    static_notice = "根據平面圓形與幾何圖形工作紙考點，計算圓心、切點、多圓重疊、長方形內切圓、三角形與長方體體積的關係。"
-    write_to_exam_vault(static_notice)
-    st.text_area("📝 範圍狀態（已鎖定）：", value=static_notice, height=70, disabled=True)
+text_input_val = st.text_area("📝 在此修改或輸入幾何範圍核心概念：", value=current_vault_ocr, height=150, key="ocr_box_editor")
+if text_input_val != current_vault_ocr:
+    write_to_exam_vault(text_input_val)
+    current_vault_ocr = text_input_val
 
 st.write("##")
 btn_call_ai = st.button("🚀 呼叫「分批拼接不偷懶引擎」生成完整試卷 🤖", type="secondary", use_container_width=True)
@@ -382,7 +374,7 @@ if btn_call_ai:
             geo_rule = f"""
             ⚠️【核心幾何命令】：考量到本次範圍涉及幾何，你必須在題目中穿插嵌入幾何圖形標記。
             🔥【絕對指令 1 - 範圍匹配】：請「嚴格限制」只選用與給定範圍概念相關的圖形！例如範圍只寫了「三角形」，就絕對不准出「圓形」或「長方體」題目！
-            🔥【絕對指令 2 -動態參數】：標記中的參數數值 (如 w, h, r1, b, l 等) 必須根據你當前出題的實際數字「動態填入」，絕對不能照抄下方範例的死數字！
+            🔥【絕對指令 2 - 動態參數】：標記中的參數數值 (如 w, h, r1, b, l 等) 必須根據你當前出題的實際數字「動態填入」，絕對不能照抄下方範例的死數字！
             
             可選用的標記格式 (請將中文描述替換成你出題時的實際數字，例如題目三角形底是20，高是8，則輸出 [GEOMETRIC:triangle:b=20;h=8])：
             - [GEOMETRIC:three_circles_linear:r1=大圓半徑;r2=中圓半徑;r3=小圓半徑] (僅限範圍含圓形性質時使用)
@@ -405,7 +397,7 @@ if btn_call_ai:
         task_step = 1.0 / len(tasks) if tasks else 1.0
         
         for idx, (t_title, t_num) in enumerate(tasks):
-            st.toast(f"⏳ 正在生成{t_title}... 拒絕任何省略號！", icon="📝")
+            st.toast(f"⏳ 正在生成{t_title}", icon="📝")
             
             sub_prompt = f"""你是一位香港名校【{subject}科】主任。請為【香港小學{grade}】編寫【{subject}科】測驗卷的【{t_title}】。
             本次出題範圍/重點為：「{final_vault_text}」
@@ -450,7 +442,7 @@ col_edit1, col_edit2 = st.columns(2)
 with col_edit1:
     if 'exam_text_editor' not in st.session_state: st.session_state['exam_text_editor'] = st.session_state['generated_exam']
     def on_exam_change(): st.session_state['generated_exam'] = st.session_state['exam_text_editor']
-    st.text_area("題目微調（拒絕省略號）：", value=st.session_state['exam_text_editor'], height=350, key="exam_text_editor", on_change=on_exam_change)
+    st.text_area("題目微調：", value=st.session_state['exam_text_editor'], height=350, key="exam_text_editor", on_change=on_exam_change)
 with col_edit2:
     if 'ans_text_editor' not in st.session_state: st.session_state['ans_text_editor'] = st.session_state['generated_answers']
     def on_ans_change(): st.session_state['generated_answers'] = st.session_state['ans_text_editor']
