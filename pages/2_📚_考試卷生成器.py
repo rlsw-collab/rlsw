@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.9.2：去iPad化、支援檔案即時預覽、對接 GitHub 實現知識庫的增、刪、改、單張圖片清理功能
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.9.2"
+# 🆕 升級 v1.9.3：修復徹底刪除按鈕顯示問題、強化雲端舊檔案實時解碼預覽與刪除增改的管理視覺
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.9.3"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -500,7 +500,7 @@ with tab_exam:
             if has_geometry:
                 if language == "繁體中文":
                     geo_rule = f"""
-                    ⚠️【核心幾何命令】：考量到本次範圍涉及幾何，你必須在題目中穿插嵌入幾何圖形標記。
+                    ⚠️【核心幾何命令】：考量到本次範圍涉及幾何，你必須在題目中穿跨嵌入幾何圖形標記。
                     🔥【絕對指令 1 - 範圍匹配】：請「嚴格限制」只選用與給定範圍概念相關的圖形！
                     🔥【絕對指令 2 - 動態參數】：標記中的參數數值 (如 w, h, r1, b, l 等) 必須根據你當前出題的實際數字「動態填入」，絕對不能照抄下方範例的死數字！
                     
@@ -680,55 +680,70 @@ with tab_exam:
         components.html(html_for_printing, height=1200, scrolling=True)
 
 # ------------------------------------------
-# TAB 2: 雲端多圖知識庫管理 (全新升級升級)
+# TAB 2: 雲端多圖知識庫管理 (修復優化版)
 # ------------------------------------------
 with tab_kb:
     st.header("📂 雲端課文/作業/工作紙知識庫管理")
     st.info("💡 你可以在這裡建立、追加修改或徹底刪除雲端檔案儲存庫，上傳的檔案將會永久保存。")
     
-    # 增加管理模式：新建庫 vs 編輯現有庫
+    # 管理模式：新建庫 vs 編輯現有庫
     kb_action = st.radio("⚙️ 請選擇操作模式：", ["🆕 建立全新知識庫", "✏️ 編輯 / 追加現有知識庫"], horizontal=True)
     
     current_kb_name = ""
     existing_images = []
     
+    # 如果選擇編輯現有知識庫
     if kb_action == "✏️ 編輯 / 追加現有知識庫":
         cloud_lists = list_knowledge_bases_from_github()
         if not cloud_lists:
             st.warning("⚠️ 目前雲端沒有任何知識庫，已為你自動切換為新建模式。")
             kb_action = "🆕 建立全新知識庫"
         else:
-            selected_edit_kb = st.selectbox("📁 請選擇要加載修正的雲端知識庫：", cloud_lists)
+            st.markdown("### 📁 選擇與管理雲端庫")
+            col_sel, col_del = st.columns([3, 1])
+            
+            with col_sel:
+                selected_edit_kb = st.selectbox("請選擇要讀取的雲端知識庫：", cloud_lists, label_visibility="collapsed")
+            
+            # 🔥【一鍵徹底刪除區域】提上來放在最顯眼、獨立的位置
+            with col_del:
+                if selected_edit_kb:
+                    if st.button(f"🗑️ 徹底刪除整個「{selected_edit_kb}」", type="primary", use_container_width=True):
+                        with st.spinner("正在呼叫 GitHub API 抹除雲端檔案..."):
+                            if delete_knowledge_base_from_github(selected_edit_kb):
+                                st.success(f"🔥 雲端知識庫「{selected_edit_kb}」已徹底抹除！")
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error("❌ 刪除失敗，請檢查權限。")
+
+            # 🌟【已存檔案預覽功能】
             if selected_edit_kb:
                 current_kb_name = selected_edit_kb
                 kb_payload = get_knowledge_base_content(selected_edit_kb)
                 if kb_payload:
                     existing_images = kb_payload.get("images", [])
-                    st.success(f"📂 已成功從雲端載入「{selected_edit_kb}」，當前庫內共有 {len(existing_images)} 張存檔檔案。")
                     
-                    # 🔴 刪除整個知識庫按鈕
                     st.write("##")
-                    if st.button(f"🗑️ 徹底刪除整個「{selected_edit_kb}」知識庫", type="secondary"):
-                        if delete_knowledge_base_from_github(selected_edit_kb):
-                            st.success(f"🔥 雲端知識庫「{selected_edit_kb}」已徹底抹除！")
-                            time.sleep(1)
-                            st.rerun()
-                        else:
-                            st.error("❌ 刪除失敗，請檢查權限。")
-                            
-                    # 展示當前圖片，並支援單張「刪除」
-                    st.write("---")
-                    st.markdown("### 🖼️ 當前雲端已存檔案預覽與管理（可點擊減去圖片）：")
-                    cols = st.columns(4)
-                    keep_images = []
-                    for img_idx, b64_data in enumerate(existing_images):
-                        with cols[img_idx % 4]:
-                            st.image(f"data:image/jpeg;base64,{b64_data}", use_container_width=True)
-                            if st.checkbox("刪除此檔案", key=f"del_img_{img_idx}"):
-                                pass # 選中就不放進 keep_images
-                            else:
-                                keep_images.append(b64_data)
-                    existing_images = keep_images
+                    st.markdown(f"### 📦 雲端已存檔案預覽（共 {len(existing_images)} 張，勾選可將個別圖片從庫中剔除）：")
+                    
+                    if len(existing_images) == 0:
+                        st.info("💡 該知識庫內目前沒有任何檔案圖片。")
+                    else:
+                        cols = st.columns(4)
+                        keep_images = []
+                        for img_idx, b64_data in enumerate(existing_images):
+                            with cols[img_idx % 4]:
+                                # 實時將雲端 base64 渲染出來供用戶加減
+                                try:
+                                    st.image(f"data:image/jpeg;base64,{b64_data}", use_container_width=True)
+                                    if st.checkbox("❌ 刪除此檔案", key=f"del_img_{img_idx}"):
+                                        st.caption("⚠️ 更新時將會移除此圖")
+                                    else:
+                                        keep_images.append(b64_data)
+                                except Exception as img_err:
+                                    st.error("圖片加載出錯")
+                        existing_images = keep_images
 
     st.write("---")
     st.markdown("### 📥 上傳與追加新檔案" if kb_action == "✏️ 編輯 / 追加現有知識庫" else "### 📥 建立全新檔案資料庫")
@@ -748,10 +763,11 @@ with tab_kb:
             b64_str = base64.b64encode(f_bytes).decode("utf-8")
             new_b64_list.append(b64_str)
             with preview_cols[f_idx % 5]:
-                st.image(f_bytes, use_container_width=True, caption=f"新檔案 {f_idx+1}")
+                st.image(f_bytes, use_container_width=True, caption=f"新上傳 {f_idx+1}")
 
     # 保存按鈕
-    if st.button("💾 儲存並同步至雲端知識庫", type="primary", use_container_width=True):
+    st.write("##")
+    if st.button("💾 儲存並同步至雲端知識庫", type="primary", use_container_width=True, key="save_kb_btn"):
         if not current_kb_name.strip():
             st.error("❌ 請輸入或選擇有效的知識庫名稱！")
         else:
@@ -767,4 +783,4 @@ with tab_kb:
                         time.sleep(1)
                         st.rerun()
                     else:
-                        st.error("❌ 同步失敗，請確認 GitHub Secrets 設定。")
+                        st.error("❌ 同步失敗，請確認 GitHub Secrets 設定是否正確。")
