@@ -12,35 +12,13 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.9.0：將系統版本標題改為 CSS 固定置頂懸浮（Sticky Header），確保滾動時不消失
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.9.0"
+# 🆕 升級 v1.9.1：移除強制懸浮置頂，回歸自然網頁流，確保標題完美待在 Tabs 上方不擋畫面
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.9.1"
 
-# 注入全域樣式：包含打印控制與固定置頂標題（Fixed Header）的排版
+# 注入母網頁的 @media print 打印樣式
 st.markdown("""
 <style>
-/* 1. 固定置頂標題樣式 */
-.sticky-header {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    background-color: #f0f2f6; /* 跟 Streamlit 默認底色接近，也可改 white */
-    padding: 15px 30px;
-    font-size: 28px;
-    font-weight: bold;
-    color: #31333F;
-    border-bottom: 2px solid #e0e0e0;
-    z-index: 999999;
-}
-
-/* 2. 為主體內容留出頂部空間，避免被置頂標題擋住 */
-.main-content-padding {
-    padding-top: 75px;
-}
-
-/* 3. @media print 打印專用樣式 */
 @media print {
-    .sticky-header,
     div[data-testid="stSidebar"],
     header[data-testid="stHeader"],
     footer,
@@ -66,16 +44,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 顯示置頂標題
-st.markdown(f'<div class="sticky-header">{APP_TITLE}</div>', unsafe_allow_html=True)
+# 採用標準的 st.title，確保永遠自然排在最頂部
+st.title(APP_TITLE)
 
-# 密碼鎖邏輯
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
 
 if not st.session_state['authenticated']:
-    # 密碼界面同樣套用主體 Padding
-    st.markdown('<div class="main-content-padding"></div>', unsafe_allow_html=True)
     st.info("🔒 此工具受保護，請輸入密碼以解鎖並使用。")
     pwd_input = st.text_input("輸入專屬訪問密碼：", type="password")
     if st.button("解鎖 🔓"):
@@ -170,7 +145,7 @@ def get_knowledge_base_content(kb_name):
         "Accept": "application/vnd.github.v3+json"
     }
     try:
-        res = requests.get(url, headers=headers)
+        res =requests.get(url, headers=headers)
         if res.status_code == 200:
             content = base64.b64decode(res.json()["content"]).decode("utf-8")
             return json.loads(content)
@@ -416,9 +391,7 @@ def python_layout_engine(raw_text, is_answer_key=False):
 # ==========================================
 # 🏠 Streamlit 分頁標籤 (TAB 佈局)
 # ==========================================
-# 塞入主體 Padding 樣式，使內容不被固定標題遮擋
-st.markdown('<div class="main-content-padding"></div>', unsafe_allow_html=True)
-
+# Tabs 直接緊跟在 st.title 標題正下方，結構乾淨自然
 tab_exam, tab_kb = st.tabs(["📝 試卷生成工具", "📂 雲端多圖知識庫管理"])
 
 # ------------------------------------------
@@ -481,7 +454,6 @@ with tab_exam:
         elif scope_mode == "選用先前存放的雲端知識庫" and not chosen_kb_images:
             st.error("❌ 所選知識庫無有效數據，無法建立試卷庫！")
         else:
-            # 🌟 階段一：如果使用雲端多圖知識庫，先叫 GPT-4o 融合成文字庫
             if scope_mode == "選用先前存放的雲端知識庫" and chosen_kb_images:
                 st.toast("🔮 正在由 GPT-4o 深度解構所有知識庫圖片以建立精準試題庫...", icon="📦")
                 
@@ -505,7 +477,6 @@ with tab_exam:
                     st.error("❌ 雲端圖片庫深度分析失敗，請檢查網絡通道。")
                     st.stop()
 
-            # 🌟 階段二：常規出題架構流程
             has_geometry = any(kw in final_vault_text.lower() for kw in ["圓", "三角", "面積", "體積", "長方體", "正方體", "circle", "triangle", "area", "volume", "cuboid"])
             
             geo_rule = ""
@@ -602,26 +573,26 @@ with tab_exam:
                     {{
                       "exam_body": "### {t_title}\\n\\nList question 1 to question {t_num} sequentially here...",
                       "answer_body": "### {t_title} Answer Key & Explanations\\n\\nProvide step-by-step solutions and final answers here..."
-                }}
-                """
-            
-            res_json = call_pure_free_multiverse_ai([{"role": "user", "content": sub_prompt}], is_json=True)
-            if res_json:
-                combined_exam += ensure_flat_string(res_json.get("exam_body", "")) + "\n\n"
-                combined_ans += ensure_flat_string(res_json.get("answer_body", "")) + "\n\n"
-            else:
-                st.error(f"❌ {t_title} 生成失敗，請重試。" if language == "繁體中文" else f"❌ Failed to generate {t_title}, please try again.")
-                st.stop()
+                    }}
+                    """
                 
-            progress_bar.progress((idx + 1) * task_step)
-            time.sleep(0.5)
+                res_json = call_pure_free_multiverse_ai([{"role": "user", "content": sub_prompt}], is_json=True)
+                if res_json:
+                    combined_exam += ensure_flat_string(res_json.get("exam_body", "")) + "\n\n"
+                    combined_ans += ensure_flat_string(res_json.get("answer_body", "")) + "\n\n"
+                else:
+                    st.error(f"❌ {t_title} 生成失敗，請重試。" if language == "繁體中文" else f"❌ Failed to generate {t_title}, please try again.")
+                    st.stop()
+                    
+                progress_bar.progress((idx + 1) * task_step)
+                time.sleep(0.5)
 
-        st.session_state['generated_exam'] = combined_exam
-        st.session_state['generated_answers'] = combined_ans
-        st.session_state['exam_text_editor'] = combined_exam
-        st.session_state['ans_text_editor'] = combined_ans
-        st.success("🎉 全套完整題目生成完畢！" if language == "繁體中文" else "🎉 Full exam paper generated successfully!")
-        st.rerun()
+            st.session_state['generated_exam'] = combined_exam
+            st.session_state['generated_answers'] = combined_ans
+            st.session_state['exam_text_editor'] = combined_exam
+            st.session_state['ans_text_editor'] = combined_ans
+            st.success("🎉 全套完整題目生成完畢！" if language == "繁體中文" else "🎉 Full exam paper generated successfully!")
+            st.rerun()
 
     # 原始碼控制台
     st.write("---")
