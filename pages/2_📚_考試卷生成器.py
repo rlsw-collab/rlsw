@@ -5,8 +5,6 @@ import time
 import re
 import os
 import datetime
-from PIL import Image
-import io
 
 # ==========================================
 # 0. 網頁基本設定與【密碼鎖邏輯】
@@ -73,8 +71,6 @@ try:
     GITHUB_TOKEN = st.secrets["GIT_TOKEN"]
     GEMINI_TOKEN = st.secrets["GEMINI_TOKEN"]
     AI_TOKEN = st.secrets.get("AI_TOKEN", "") # GitHub 免費 Models 綠色通道 Key
-    GITHUB_REPO = "rlsw"
-    GITHUB_USER = "rlsw-collab"
 except Exception as e:
     st.error("❌ 未能在 Streamlit Secrets 中找到基礎憑證 (GIT_TOKEN 或 GEMINI_TOKEN)。")
     st.stop()
@@ -137,21 +133,6 @@ def call_pure_free_multiverse_ai(text_prompt):
         except Exception as e:
             pass
     return None
-
-def do_gemini_ocr_with_fallback(b64_list, gemini_token):
-    prompt = "你是一個100%精準的繁體中文與英文幾何工作紙打字掃描儀。請將圖片中的所有幾何圖形題目文字、數字、選項抄寫下來。直接輸出純文字，不要加入任何解釋。"
-    parts = [{"text": prompt}]
-    for b64 in b64_list: parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
-    payload = {"contents": [{"parts": parts}]}
-    models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash"]
-    for model_id in models:
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={gemini_token}"
-        try:
-            res = requests.post(api_url, headers={"Content-Type": "application/json"}, json=payload, timeout=40)
-            if res.status_code == 200:
-                return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-        except: continue
-    return "❌ 圖片辨識失敗，請稍候重試或手動輸入。"
 
 # ==========================================
 # 🎨 🛠️ 幾何圖形 SVG 印刷級動態渲染器 🛠️ 🎨
@@ -374,7 +355,6 @@ with col_s4: text_count = st.slider("長題目文字題", 0, 30, 0, step=5)
 st.write("---")
 st.header("🎯 步驟二：設定出題範圍來源")
 range_mode = st.radio("範圍模式選擇：", ["提供範圍", "提供幾何工作紙模板"], horizontal=True)
-uploaded_files = st.file_uploader("上傳工作紙進行幾何智慧辨識", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
 
 if range_mode == "提供範圍":
     text_input_val = st.text_area("📝 在此修改或輸入幾何範圍核心概念：", value=current_vault_ocr, height=150, key=f"ocr_box_{vault_hash}")
@@ -402,7 +382,7 @@ if btn_call_ai:
             geo_rule = f"""
             ⚠️【核心幾何命令】：考量到本次範圍涉及幾何，你必須在題目中穿插嵌入幾何圖形標記。
             🔥【絕對指令 1 - 範圍匹配】：請「嚴格限制」只選用與給定範圍概念相關的圖形！例如範圍只寫了「三角形」，就絕對不准出「圓形」或「長方體」題目！
-            🔥【絕對指令 2 - 動態參數】：標記中的參數數值 (如 w, h, r1, b, l 等) 必須根據你當前出題的實際數字「動態填入」，絕對不能照抄下方範例的死數字！
+            🔥【絕對指令 2 -動態參數】：標記中的參數數值 (如 w, h, r1, b, l 等) 必須根據你當前出題的實際數字「動態填入」，絕對不能照抄下方範例的死數字！
             
             可選用的標記格式 (請將中文描述替換成你出題時的實際數字，例如題目三角形底是20，高是8，則輸出 [GEOMETRIC:triangle:b=20;h=8])：
             - [GEOMETRIC:three_circles_linear:r1=大圓半徑;r2=中圓半徑;r3=小圓半徑] (僅限範圍含圓形性質時使用)
@@ -413,10 +393,10 @@ if btn_call_ai:
             """
 
         tasks = []
-        if mc_count > 0: tasks.append(("MC", f"第一部分：多項選擇題（共 {mc_count} 題，題號由 1 開始到 {mc_count}）", mc_count))
-        if fill_count > 0: tasks.append(("FILL", f"第二部分：填充題（共 {fill_count} 題，題號由 {mc_count+1} 開始到 {mc_count+fill_count}）", fill_count))
-        if calc_count > 0: tasks.append(("CALC", f"第三部分：列式計算題（共 {calc_count} 題，題號由 {mc_count+fill_count+1} 開始到 {mc_count+fill_count+calc_count}）", calc_count))
-        if text_count > 0: tasks.append(("TEXT", f"第四部分：長題目文字題（共 {text_count} 題，題號由 {mc_count+fill_count+calc_count+1} 開始到 {mc_count+fill_count+calc_count+text_count}）", text_count))
+        if mc_count > 0: tasks.append((f"第一部分：多項選擇題（共 {mc_count} 題，題號由 1 開始到 {mc_count}）", mc_count))
+        if fill_count > 0: tasks.append((f"第二部分：填充題（共 {fill_count} 題，題號由 {mc_count+1} 開始到 {mc_count+fill_count}）", fill_count))
+        if calc_count > 0: tasks.append((f"第三部分：列式計算題（共 {calc_count} 題，題號由 {mc_count+fill_count+1} 開始到 {mc_count+fill_count+calc_count}）", calc_count))
+        if text_count > 0: tasks.append((f"第四部分：長題目文字題（共 {text_count} 題，題號由 {mc_count+fill_count+calc_count+1} 開始到 {mc_count+fill_count+calc_count+text_count}）", text_count))
 
         combined_exam = f"### 香港小學{grade}{subject}科測驗卷\n班別：__________  姓名：__________  學號：__________\n\n"
         combined_ans = "### 🔑 答案頁與幾何解題詳解 (Answer Key)\n\n"
@@ -424,10 +404,10 @@ if btn_call_ai:
         progress_bar = st.progress(0.0)
         task_step = 1.0 / len(tasks) if tasks else 1.0
         
-        for idx, (t_type, t_title, t_num) in enumerate(tasks):
+        for idx, (t_title, t_num) in enumerate(tasks):
             st.toast(f"⏳ 正在生成{t_title}... 拒絕任何省略號！", icon="📝")
             
-            sub_prompt = f"""你是一位香港名校數學科組長。請為【香港小學{grade}】編寫【{subject}科】測驗卷的【{t_title}】。
+            sub_prompt = f"""你是一位香港名校【{subject}科】主任。請為【香港小學{grade}】編寫【{subject}科】測驗卷的【{t_title}】。
             本次出題範圍/重點為：「{final_vault_text}」
             
             要求：
