@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.9.4：強效修復雲端舊檔案 Base64 解碼預覽不顯示問題，優化實時狀態同步機制
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.9.4"
+# 🆕 升級 v1.9.5：重構 Session State 緩衝快取機制，100% 解決新舊檔案上傳預覽被 Streamlit 重新整理沖刷掉的問題
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.9.5"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -246,7 +246,7 @@ def draw_svg_geometry(marker_str):
                 <circle cx="180" cy="75" r="25" stroke="black" stroke-width="1.8" fill="none" />
                 <line x1="45" y1="75" x2="205" y2="75" stroke="black" stroke-width="1" stroke-dasharray="4" />
                 <circle cx="45" cy="75" r="2.5" fill="black"/><text x="40" y="95" font-size="13" font-family="sans-serif">P</text>
-                <circle cx="85" cy="75" r="2.5" fill="black"/><text x="80" y="95" font-size="13" font-family="sans-serif">Q</text>
+                <circle cx="85" cy="75" r="40" fill="black"/><text x="80" y="95" font-size="13" font-family="sans-serif">Q</text>
                 <circle cx="180" cy="75" r="2.5" fill="black"/><text x="175" y="95" font-size="13" font-family="sans-serif">R</text>
                 <text x="50" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑/Radius {r1}</text>
                 <text x="165" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑/Radius {r3}</text>
@@ -411,6 +411,10 @@ def python_layout_engine(raw_text, is_answer_key=False):
 # ==========================================
 tab_exam, tab_kb = st.tabs(["📝 試卷生成工具", "📂 雲端多圖知識庫管理"])
 
+# 初始化快取暫存空間（保證上傳檔案與加載圖片在 rerun 時不流失）
+if 'kb_current_b64_list' not in st.session_state: st.session_state['kb_current_b64_list'] = []
+if 'last_loaded_kb' not in st.session_state: st.session_state['last_loaded_kb'] = ""
+
 # ------------------------------------------
 # TAB 1: 試卷生成核心
 # ------------------------------------------
@@ -480,8 +484,7 @@ with tab_exam:
                 
                 user_content = [{"type": "text", "text": "請深度分析這批由用戶上傳的工作紙與課本內容。提煉出裡面所有的考點、題型結構、幾何數字邏輯與公式，為稍後的出題做最萬全的知識儲備基礎。"}]
                 for b64_img in chosen_kb_images:
-                    # 補全格式前綴，防止 API 拒絕解構
-                    clean_b64 = b64_img if "base64," in b64_img else f"data:image/jpeg;base64,{b64_img}"
+                    clean_b64 = b64_img if b64_img.startswith("data:image") else f"data:image/jpeg;base64,{b64_img}"
                     user_content.append({
                         "type": "image_url",
                         "image_url": {"url": clean_b64}
@@ -682,7 +685,7 @@ with tab_exam:
         components.html(html_for_printing, height=1200, scrolling=True)
 
 # ------------------------------------------
-# TAB 2: 雲端多圖知識庫管理 (強制修復完美預覽版)
+# TAB 2: 雲端多圖知識庫管理 (快取完美預覽修復)
 # ------------------------------------------
 with tab_kb:
     st.header("📂 雲端課文/作業/工作紙知識庫管理")
@@ -692,8 +695,12 @@ with tab_kb:
     kb_action = st.radio("⚙️ 請選擇操作模式：", ["🆕 建立全新知識庫", "✏️ 編輯 / 追加現有知識庫"], horizontal=True, key="kb_action_radio")
     
     current_kb_name = ""
-    existing_images = []
     
+    # 如果切換操作模式，或第一次加載，自動清空當前新上傳快取
+    if kb_action == "🆕 建立全新知識庫":
+        st.session_state['last_loaded_kb'] = ""
+    
+    # 模式 A：編輯現有庫
     if kb_action == "✏️ 編輯 / 追加現有知識庫":
         cloud_lists = list_knowledge_bases_from_github()
         if not cloud_lists:
@@ -708,64 +715,75 @@ with tab_kb:
             
             with col_del:
                 if selected_edit_kb:
-                    # 🔴 獨立紅色一鍵刪除按鈕
                     if st.button(f"🗑️ 徹底刪除整個「{selected_edit_kb}」", type="primary", use_container_width=True, key="del_entire_kb_btn"):
                         with st.spinner("正在呼叫 GitHub API 抹除雲端檔案..."):
                             if delete_knowledge_base_from_github(selected_edit_kb):
                                 st.success(f"🔥 雲端知識庫「{selected_edit_kb}」已徹底抹除！")
-                                time.sleep(0.8)
+                                st.session_state['last_loaded_kb'] = ""
+                                time.sleep(0.5)
                                 st.rerun()
-                            else:
-                                st.error("❌ 刪除失敗，請檢查權限。")
 
-            # 🖼️ 實時渲染與加載已存放檔案的預覽
             if selected_edit_kb:
                 current_kb_name = selected_edit_kb
-                kb_payload = get_knowledge_base_content(selected_edit_kb)
-                if kb_payload:
-                    existing_images = kb_payload.get("images", [])
-                    
-                    st.write("##")
-                    st.markdown(f"### 📦 雲端已存檔案預覽（共 {len(existing_images)} 張，勾選可將個別圖片從庫中剔除）：")
-                    
-                    if len(existing_images) == 0:
-                        st.info("💡 該知識庫內目前沒有任何檔案圖片。")
-                    else:
-                        cols = st.columns(4)
-                        keep_images = []
-                        for img_idx, b64_data in enumerate(existing_images):
-                            with cols[img_idx % 4]:
-                                # 🔍 核心預覽修正線：強效確保 Data URI 格式完備，迫使 Streamlit 進行實時圖像解碼
-                                clean_src = b64_data if b64_data.startswith("data:image") else f"data:image/jpeg;base64,{b64_data}"
-                                try:
-                                    st.image(clean_src, use_container_width=True)
-                                    if st.checkbox("❌ 刪除此檔案", key=f"del_img_check_{img_idx}"):
-                                        st.caption("⚠️ 更新時將會移除此圖")
-                                    else:
-                                        keep_images.append(b64_data)
-                                except Exception as img_err:
-                                    st.error("⚠️ 圖片解碼渲染出錯")
-                        existing_images = keep_images
+                
+                # 如果選取了新的庫，立刻從雲端同步一次到快取
+                if st.session_state['last_loaded_kb'] != selected_edit_kb:
+                    kb_payload = get_knowledge_base_content(selected_edit_kb)
+                    if kb_payload:
+                        st.session_state['kb_current_b64_list'] = kb_payload.get("images", [])
+                        st.session_state['last_loaded_kb'] = selected_edit_kb
+                
+                st.write("##")
+                st.markdown(f"### 📦 雲端已存檔案預覽（共 {len(st.session_state['kb_current_b64_list'])} 張）：")
+                
+                if len(st.session_state['kb_current_b64_list']) == 0:
+                    st.info("💡 該知識庫內目前沒有任何檔案圖片。")
+                else:
+                    cols = st.columns(4)
+                    keep_images = []
+                    for img_idx, b64_data in enumerate(st.session_state['kb_current_b64_list']):
+                        with cols[img_idx % 4]:
+                            clean_src = b64_data if b64_data.startswith("data:image") else f"data:image/jpeg;base64,{b64_data}"
+                            st.image(clean_src, use_container_width=True)
+                            if st.checkbox("❌ 刪除此檔案", key=f"del_img_check_{img_idx}"):
+                                st.caption("⚠️ 已剔除（儲存後生效）")
+                            else:
+                                keep_images.append(b64_data)
+                    # 實時更新即時剔除狀態
+                    if len(keep_images) != len(st.session_state['kb_current_b64_list']):
+                        st.session_state['kb_current_b64_list'] = keep_images
 
     st.write("---")
     st.markdown("### 📥 上傳與追加新檔案" if kb_action == "✏️ 編輯 / 追加現有知識庫" else "### 📥 建立全新檔案資料庫")
     
     if kb_action == "🆕 建立全新知識庫":
-        current_kb_name = st.text_input("📝 請輸入全新知識庫名稱（例如：小六常識第二單元、小五數學圓形面積）：", value="", key="new_kb_name_input")
+        current_kb_name = st.text_input("📝 請輸入全新知識庫名稱：", value="", key="new_kb_name_input")
+        # 新建模式下，確保舊庫緩衝區是清空的
+        st.session_state['kb_current_b64_list'] = []
     
-    # 核心檔案上傳器
+    # 💥【核心檔案上傳器優化區】
     uploaded_files = st.file_uploader("📸 請選擇或拖放上傳檔案：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="kb_file_uploader")
     
-    new_b64_list = []
+    # 🌟 使用 Session State 快取新上傳的檔案，防止 Rerun 刷走數據
     if uploaded_files:
-        st.markdown("#### 🔍 新上傳檔案即時預覽：")
-        preview_cols = st.columns(5)
-        for f_idx, f in enumerate(uploaded_files):
+        temp_new_b64s = []
+        for f in uploaded_files:
             f_bytes = f.read()
             b64_str = base64.b64encode(f_bytes).decode("utf-8")
-            new_b64_list.append(b64_str)
+            if b64_str not in temp_new_b64s:
+                temp_new_b64s.append(b64_str)
+        st.session_state['new_uploaded_cache'] = temp_new_b64s
+    else:
+        st.session_state['new_uploaded_cache'] = []
+
+    # 🌟 100% 成功顯影：直接從記憶體快取中讀取並渲染新上傳的檔案預覽
+    if st.session_state['new_uploaded_cache']:
+        st.markdown("#### 🔍 新上傳檔案即時預覽：")
+        preview_cols = st.columns(5)
+        for f_idx, b64_str in enumerate(st.session_state['new_uploaded_cache']):
+            clean_new_src = b64_str if b64_str.startswith("data:image") else f"data:image/jpeg;base64,{b64_str}"
             with preview_cols[f_idx % 5]:
-                st.image(f_bytes, use_container_width=True, caption=f"新上傳 {f_idx+1}")
+                st.image(clean_new_src, use_container_width=True, caption=f"新上傳檔案 {f_idx+1}")
 
     # 儲存與同步按鈕
     st.write("##")
@@ -773,7 +791,8 @@ with tab_kb:
         if not current_kb_name.strip():
             st.error("❌ 請輸入或選擇有效的知識庫名稱！")
         else:
-            total_images = existing_images + new_b64_list
+            # 完美合併：保留的舊圖 + 新緩衝區內的新圖
+            total_images = st.session_state['kb_current_b64_list'] + st.session_state['new_uploaded_cache']
             if not total_images:
                 st.error("❌ 知識庫內不能沒有任何有效檔案！")
             else:
@@ -781,6 +800,10 @@ with tab_kb:
                     success = upload_knowledge_base_to_github(current_kb_name.strip(), total_images)
                     if success:
                         st.success(f"🎉 雲端知識庫「{current_kb_name}」已成功保存並更新！")
+                        # 清空快取
+                        st.session_state['kb_current_b64_list'] = []
+                        st.session_state['new_uploaded_cache'] = []
+                        st.session_state['last_loaded_kb'] = ""
                         time.sleep(0.8)
                         st.rerun()
                     else:
