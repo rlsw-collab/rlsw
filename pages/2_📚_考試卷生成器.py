@@ -14,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.5.8：純免費特攻版 (Google 3路免費大腦 + GitHub 綠色通道 GPT-4o 終極防線 + iPad OS 列印優化)
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.5.8"
+# 🆕 升級 v1.5.9：純免費特攻版 (Google 3路免費大腦 + GitHub 綠色通道 GPT-4o 終極防線 + iPad OS 列印優化 + 填充答題線 3 倍長優化)
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.5.9"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -233,7 +233,7 @@ def call_pure_free_multiverse_ai(text_prompt):
     return None, None
 
 # ==========================================
-# 2. 輔助函式：圖片處理 & OCR 保底 (100% 僅調用 Gemini)
+# 2. 輔育函式：圖片處理 & OCR 保底 (100% 僅調用 Gemini)
 # ==========================================
 def convert_image_to_base64(file_val):
     image = Image.open(io.BytesIO(file_val))
@@ -297,6 +297,11 @@ def python_layout_engine(raw_text, is_answer_key=False):
     for line in lines:
         if not line.strip(): continue
         clean_line = line.replace("**", "").replace("###", "").strip()
+        
+        # 🌟 智慧正則：將任何連續 2 個以上的半形底線（_）或全形底線（＿）替換成拉長 3 倍的專業 HTML 答題線
+        line = re.sub(r'([_＿]{2,})', r'<span class="fill-blank-underline"></span>', line)
+        # 🌟 智慧正則：將括號內有空格的（如 "(   )" 或 "（   ）"）替換為內嵌 3 倍寬度底線的精緻答題區
+        line = re.sub(r'([\(（])\s{2,}([\)）])', r'\1 <span class="fill-blank-underline"></span> \2', line)
         
         if "數學科測驗" in clean_line or "數學科考試" in clean_line or ("考試" in clean_line and "部" not in clean_line and "题" not in clean_line and len(clean_line) < 35):
             processed_lines.append(f'<div class="exam-title-main">{clean_line}</div>')
@@ -386,7 +391,6 @@ else:
     st.text_area("📝 範圍狀態（已鎖定）：", value=static_notice, height=70, disabled=True)
 
 st.write("##")
-# 🚀 完美正名：更名為多通道生成
 btn_call_ai = st.button("🚀 呼叫 AI 免費多通道生成新題目 🤖", type="secondary", use_container_width=True)
 
 if btn_call_ai:
@@ -478,7 +482,7 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
         
     auto_print_js = "window.print();" if trigger_print else ""
 
-    # 編譯完整 HTML 打印文檔架構
+    # 編譯完整 HTML 打印文檔架構 (已調校 3 倍長答題線)
     html_for_printing = f"""
     <!DOCTYPE html>
     <html style="background-color: white !important; color: black !important; color-scheme: light !important;">
@@ -492,6 +496,17 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
         .exam-title-main {{ font-size: 26px !important; font-weight: 800 !important; text-align: center !important; margin-top: 25px !important; margin-bottom: 15px !important; letter-spacing: 2px; color: #000000 !important; }}
         .exam-user-info {{ font-size: 18px !important; font-weight: bold !important; text-align: center !important; margin-bottom: 35px !important; word-spacing: 15px; color: #000000 !important; }}
         .exam-section-header {{ font-size: 20px !important; font-weight: 800 !important; color: #000000 !important; margin-top: 30px !important; margin-bottom: 12px !important; border-left: 5px solid #000 !important; padding-left: 10px; }}
+        
+        /* 🌟 完美的 3 倍長填充題印刷答題線 */
+        .fill-blank-underline {{
+            display: inline-block;
+            width: 180px; /* 3倍超長設計，提供充足書寫空間 */
+            border-bottom: 1.5px solid #000000 !important;
+            margin: 0 10px;
+            height: 18px;
+            vertical-align: bottom;
+        }}
+
         .v-frac {{ display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; line-height: 1.0; padding: 0 4px; font-size: 0.85em; position: relative; top: -0.15em; }}
         .v-frac .num {{ border-bottom: 1.5px solid #000000; padding-bottom: 2px; min-width: 14px; font-weight: 600; }}
         .v-frac .den {{ padding-top: 2px; min-width: 14px; font-weight: 600; }}
