@@ -4,7 +4,7 @@ import re
 import base64
 import requests
 import datetime
-import json  # 🌟 補齊原本漏掉的 json 庫，防計數器崩潰
+import json
 from PIL import Image
 import io
 import streamlit as st
@@ -47,7 +47,7 @@ def get_hkt_date_str():
     return datetime.datetime.now(tz_hkt).strftime("%Y-%m-%d")
 
 def increment_github_counter(model_id):
-    """全新架構：直接在 JSON 第一層建立真實模型名稱並累加"""
+    """全新架架：直接在 JSON 第一層建立真實模型名稱並累加"""
     if not GIT_TOKEN:
         return
     path = "usage_counter.json"
@@ -102,7 +102,6 @@ def increment_github_counter(model_id):
 # 🧠 核心 OCR 與雙語文本清洗多通道穿透調用
 # ==========================================================
 def gemini_vision_extract_bilingual(image_bytes):
-    # 依序嘗試的高可用模型陣列
     models_to_try = ["gemini-2.5-flash", "gemini-2.5-pro"]
     
     prompt_text = (
@@ -141,13 +140,11 @@ def gemini_vision_extract_bilingual(image_bytes):
         try:
             res = requests.post(url, headers=headers, json=payload, timeout=30)
             if res.status_code == 200:
-                # 🎉 成功提取：觸發全新計數器，傳入當前真實調用的 model_id
                 increment_github_counter(model_id)
                 return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
         except Exception:
             pass
             
-    # 若 Gemini 全數失敗，啟動備份萬用通道（降級為標準 OCR）
     if AI_TOKEN:
         try:
             url = "https://api.oneapi.sh/v1/chat/completions"
@@ -235,10 +232,8 @@ with tabs[0]:
                     else:
                         st.error("❌ 文字提取失敗，請確保圖片清晰或切換為手動輸入。")
                         
-    # 讀取緩存內容
     vault_content = read_from_vault()
     st.markdown("### 2. 默書內容校對與編輯區")
-    st.caption("提示：每行獨立為一個朗讀單元。中文行首請加上 `[CH]`，英文行首加上 `[EN]`，以便系統調用最正確的香港本地女聲或標準英國女聲。")
     edited_text = st.text_area("編輯最終默書文本：", value=vault_content, height=280)
     
     if edited_text != vault_content:
@@ -254,7 +249,7 @@ with tabs[1]:
         col1, col2 = st.columns(2)
         with col1:
             speed_slider = st.slider("🐢 調整朗讀速度 (相較於標準速度)：", min_value=-50, max_value=10, value=-20, step=5)
-            custom_rate_str = f"{speed_slider}%" if speed_slider >= 0 else f"{speed_slider}%"
+            custom_rate_str = f"{speed_slider}%"
         with col2:
             st.write("")
             st.write("")
@@ -265,7 +260,6 @@ with tabs[1]:
         
         lines = [line.strip() for line in final_text.split('\n') if line.strip()]
         
-        # 建立預算靜音塊
         silence_0_5s = build_silence(500)
         silence_4_0s = build_silence(4000)
         silence_8_0s = build_silence(8000)
@@ -274,7 +268,6 @@ with tabs[1]:
         asyncio.set_event_loop(loop)
         
         for idx, line in enumerate(lines):
-            # 判斷雙語模式
             if line.startswith("[CH]"):
                 active_lang = "中文"
                 clean_line = line.replace("[CH]", "").strip()
@@ -282,10 +275,9 @@ with tabs[1]:
                 active_lang = "英文"
                 clean_line = line.replace("[EN]", "").strip()
             else:
-                active_lang = "中文"  # 預設
+                active_lang = "中文"
                 clean_line = line
                 
-            # 分配標籤與句體
             match = re.match(r'^((?:\d+\.|[A-Za-z]\.|\(\d+\))\s*)(.*)$', clean_line)
             if match:
                 p_label = match.group(1).strip()
@@ -298,7 +290,7 @@ with tabs[1]:
                 st.markdown(f"**第 {idx+1} 句 ({active_lang})** : `{clean_line}`")
                 btn_cols = st.columns([1, 2, 2])
                 
-                # 1. 課堂標準版朗讀
+                # 1. 課堂標準版朗讀 (🌟 已徹底修復語音拼接內置語法碎屑錯誤)
                 with btn_cols[0]:
                     if st.button(f"🔊 課堂朗讀版", key=f"std_{idx}"):
                         with st.spinner("合成中..."):
@@ -308,27 +300,29 @@ with tabs[1]:
                             else:
                                 blocks = [text_with_breathes.strip()]
                             
-                            sentence_audio_stream = b"""
+                            sentence_audio_stream = b""
                             for blk in blocks:
                                 blk_clean = re.sub(r'[\s·\\]', '', blk) if active_lang == "中文" else blk.strip()
                                 blk_audio = loop.run_until_complete(generate_audio_clean_raw_bilingual(blk_clean, custom_rate=custom_rate_str, mode=active_lang))
-                                if blk_audio: sentence_audio_stream += blk_audio + silence_0_5s
+                                if blk_audio: 
+                                    sentence_audio_stream += blk_audio + silence_0_5s
                             
                             unit_stream = b""
                             if p_label:
                                 label_audio = loop.run_until_complete(generate_audio_clean_raw_bilingual(p_label, custom_rate="-30%", mode=active_lang))
-                                if label_audio: unit_stream += label_audio + silence_0_5s
+                                if label_audio: 
+                                    unit_stream += label_audio + silence_0_5s
                             if sentence_audio_stream:
                                 unit_stream += sentence_audio_stream + silence_4_0s + sentence_audio_stream + silence_8_0s
                                 
                             if unit_stream:
                                 st.audio(unit_stream, format="audio/mp3")
                                 
-                # 2. 標點提示與單句下載
+                # 2. 單句全句下載
                 with btn_cols[1]:
                     if st.button(f"⬇️ 生成全句導出音頻", key=f"dl_{idx}"):
                         with st.spinner("打包音頻中..."):
-                            full_text = clean_line
+                            full_text = s_text
                             full_audio = loop.run_until_complete(generate_audio_clean_raw_bilingual(full_text, custom_rate=custom_rate_str, mode=active_lang))
                             if full_audio:
                                 st.audio(full_audio, format="audio/mp3")
