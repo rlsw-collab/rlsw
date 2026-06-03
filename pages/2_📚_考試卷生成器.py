@@ -14,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.6.5：幾何自動偵測特攻版 (關鍵字自動繪圖 + Step 5 滑桿機制 + iPad OS 列印優化)
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.6.5"
+# 🆕 升級 v1.7.0：分批不偷懶版 (分部獨立呼叫機制 + 拒絕省略號 + 幾何自動偵測 + Step 5 滑桿)
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.7.0"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -158,11 +158,10 @@ def ensure_flat_string(val):
     return str(val)
 
 # ==========================================
-# 🛡️ AI 題目生成通道 (GitHub GPT-4o 綠色通道)
+# 🛡️ AI 題目生成通道 (GitHub GPT-4o 核心單獨調用)
 # ==========================================
 def call_pure_free_multiverse_ai(text_prompt):
     if AI_TOKEN:
-        st.toast("🚀 正在啟用 GitHub 綠色通道：GPT-4o 題目與幾何 SVG 建模生成...", icon="⚡")
         url = "https://models.inference.ai.azure.com/chat/completions"
         headers = {
             "Authorization": f"Bearer {AI_TOKEN}",
@@ -171,48 +170,28 @@ def call_pure_free_multiverse_ai(text_prompt):
         github_payload = {
             "model": "gpt-4o",
             "messages": [
-                {"role": "system", "content": "You are a professional JSON output assistant. You must return a strict JSON object with fields 'exam_body' and 'answer_body'. You are allowed to embed geometric block markers like [GEOMETRIC:type:param1=val1;param2=val2] in exam_body to trigger custom drawing engines."},
+                {"role": "system", "content": "You are a professional JSON output assistant. You must return a strict JSON object with fields 'exam_body' and 'answer_body'. DO NOT OMIT ANY QUESTIONS. Write out every single item explicitly without using '...' ellipses."},
                 {"role": "user", "content": text_prompt}
             ],
             "response_format": {"type": "json_object"},
-            "temperature": 0.3
+            "temperature": 0.4
         }
         try:
-            res = requests.post(url, headers=headers, json=github_payload, timeout=75)
+            res = requests.post(url, headers=headers, json=github_payload, timeout=90)
             if res.status_code == 200:
                 raw_content = res.json()['choices'][0]['message']['content'].strip()
                 raw_content = re.sub(r'^```json\s*', '', raw_content)
                 raw_content = re.sub(r'\s*```$', '', raw_content).strip()
                 increment_github_counter("backup")
-                return json.loads(raw_content), "github-gpt-4o"
+                return json.loads(raw_content)
         except Exception as e:
-            st.toast(f"⚠️ GitHub 通道失敗: {str(e)}", icon="❌")
-    return None, None
-
-def do_gemini_ocr_with_fallback(b64_list, gemini_token):
-    prompt = "你是一個100%精準的繁體中文與英文幾何工作紙打字掃描儀。請將圖片中的所有幾何圖形題目文字、數字、選項抄寫下來。直接輸出純文字，不要加入任何解釋。"
-    parts = [{"text": prompt}]
-    for b64 in b64_list: parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
-    payload = {"contents": [{"parts": parts}]}
-    models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash"]
-    for model_id in models:
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={gemini_token}"
-        try:
-            res = requests.post(api_url, headers={"Content-Type": "application/json"}, json=payload, timeout=40)
-            if res.status_code == 200:
-                increment_github_counter("main")
-                return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-        except: continue
-    return "❌ 圖片辨識失敗，請稍候重試或手動輸入。"
+            pass
+    return None
 
 # ==========================================
-# 🎨 🛠️ 核心：幾何圖形 SVG 印刷級動態渲染器 🛠️ 🎨
+# 🎨 🛠️ 幾何圖形 SVG 印刷級動態渲染器 🛠️ 🎨
 # ==========================================
 def draw_svg_geometry(marker_str):
-    """
-    解析語法：[GEOMETRIC:type:param1=val1;param2=val2]
-    並動態回傳黑白高對比、印刷級幾何向量圖
-    """
     try:
         marker_str = marker_str.replace("[", "").replace("]", "")
         parts = marker_str.split(":")
@@ -226,74 +205,52 @@ def draw_svg_geometry(marker_str):
                 params[k.strip()] = v.strip()
                 
         svg_code = ""
-        
-        # 題型一：三圓連心切點題 (模擬工作紙第3, 5題)
         if g_type == "three_circles_linear":
             r1 = params.get("r1", "6")
-            r2 = params.get("r2", "4")
             r3 = params.get("r3", "3")
             svg_code = f"""
             <div style="text-align:center; margin:15px 0;">
             <svg width="280" height="150" style="background:white;">
-                <!-- 大圓 -->
                 <circle cx="100" cy="75" r="55" stroke="black" stroke-width="1.8" fill="none" />
-                <!-- 中圓 -->
                 <circle cx="85" cy="75" r="40" stroke="black" stroke-width="1.5" fill="none" stroke-dasharray="2 2" />
-                <!-- 小圓 -->
                 <circle cx="180" cy="75" r="25" stroke="black" stroke-width="1.8" fill="none" />
-                <!-- 連心輔助虛線 -->
                 <line x1="45" y1="75" x2="205" y2="75" stroke="black" stroke-width="1" stroke-dasharray="4" />
-                <!-- 圓心標記 -->
-                <circle cx="45" cy="75" r="2.5" fill="black"/><text x="40" y="95" font-size="13" font-family="sans-serif">P</text>
-                <circle cx="85" cy="75" r="2.5" fill="black"/><text x="80" y="95" font-size="13" font-family="sans-serif">Q</text>
-                <circle cx="180" cy="75" r="2.5" fill="black"/><text x="175" y="95" font-size="13" font-family="sans-serif">R</text>
-                <!-- 數據標註 -->
-                <text x="50" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑 {r1}cm</text>
-                <text x="170" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑 {r3}cm</text>
+                <circle cx="45" cy="75" r="2.5" fill="black"/><text x="40" y="95" font-size="13">P</text>
+                <circle cx="85" cy="75" r="2.5" fill="black"/><text x="80" y="95" font-size="13">Q</text>
+                <circle cx="180" cy="75" r="2.5" fill="black"/><text x="175" y="95" font-size="13">R</text>
+                <text x="50" y="65" font-size="11" font-weight="bold">半徑 {r1}cm</text>
+                <text x="170" y="65" font-size="11" font-weight="bold">半徑 {r3}cm</text>
             </svg>
             </div>
             """
-            
-        # 題型二：長方形內切雙圓題 (模擬工作紙第2題)
         elif g_type == "circles_in_rectangle":
             w = params.get("w", "20")
             h = params.get("h", "10")
             svg_code = f"""
             <div style="text-align:center; margin:15px 0;">
             <svg width="260" height="140" style="background:white;">
-                <!-- 外框長方形 -->
                 <rect x="20" y="20" width="220" height="100" stroke="black" stroke-width="2" fill="none" />
-                <!-- 內切左圓 -->
                 <circle cx="70" cy="70" r="50" stroke="black" stroke-width="1.5" fill="none" />
-                <!-- 內切右圓 -->
                 <circle cx="170" cy="70" r="50" stroke="black" stroke-width="1.5" fill="none" />
-                <!-- 直徑/半徑箭頭標註 -->
                 <line x1="70" y1="70" x2="120" y2="70" stroke="black" stroke-width="1.2" />
                 <circle cx="70" cy="70" r="2" fill="black" />
-                <!-- 長方形長寬標註 -->
-                <text x="110" y="15" font-size="12" font-weight="bold" font-family="sans-serif">長方形長 = {w} cm</text>
-                <text x="25" y="65" font-size="11" font-family="sans-serif" transform="rotate(-90 25,65)">闊 = {h} cm</text>
+                <text x="110" y="15" font-size="12" font-weight="bold">長方形長 = {w} cm</text>
+                <text x="25" y="65" font-size="11" transform="rotate(-90 25,65)">闊 = {h} cm</text>
             </svg>
             </div>
             """
-            
-        # 題型三：大小圓重疊 / 半徑同心圓組合 (模擬工作紙第1, 4題)
         elif g_type == "concentric_overlap":
             d1 = params.get("d1", "14")
             svg_code = f"""
             <div style="text-align:center; margin:15px 0;">
             <svg width="220" height="160" style="background:white;">
-                <!-- 大圓 -->
                 <circle cx="110" cy="80" r="60" stroke="black" stroke-width="1.8" fill="none" />
-                <!-- 內切小圓（過大圓圓心） -->
                 <circle cx="110" cy="110" r="30" stroke="black" stroke-width="1.5" fill="none" />
-                <!-- 圓心 -->
                 <circle cx="110" cy="80" r="2.5" fill="black" />
-                <text x="115" y="75" font-size="12" font-family="sans-serif">O (大圓心)</text>
+                <text x="115" y="75" font-size="12">O (大圓心)</text>
                 <circle cx="110" cy="110" r="2" fill="black" />
-                <!-- 標註長度 -->
                 <line x1="110" y1="20" x2="110" y2="140" stroke="black" stroke-width="1" stroke-dasharray="3" />
-                <text x="115" y="50" font-size="11" font-weight="bold" font-family="sans-serif">大圓直徑 = {d1}cm</text>
+                <text x="115" y="50" font-size="11" font-weight="bold">大圓直徑 = {d1}cm</text>
             </svg>
             </div>
             """
@@ -302,7 +259,7 @@ def draw_svg_geometry(marker_str):
         return "📐 [幾何圖形加載錯誤] 📐"
 
 # ==========================================
-# 🚀 分數與幾何雙引擎渲染核心 🚀
+# 🚀 雙引擎渲染核心 🚀
 # ==========================================
 def convert_to_vertical_fractions(text_content):
     text_content = re.sub(r'(\d+)\s*又\s*(\d+)\s*分之\s*(\d+)', r'\1<span class="v-frac"><span class="num">\3</span><span class="den">\2</span></span>', text_content)
@@ -313,20 +270,17 @@ def convert_to_vertical_fractions(text_content):
     return text_content
 
 def python_layout_engine(raw_text, is_answer_key=False):
-    if raw_text:
-        raw_text = raw_text.replace("\\n", "\n").replace("\\\\n", "\n")
-        
+    if not raw_text: return ""
+    raw_text = raw_text.replace("\\n", "\n").replace("\\\\n", "\n")
     raw_text = re.sub(r'\s*([○●]\s*[A-D]\.)', r'\n\1', raw_text)
     raw_text = convert_to_vertical_fractions(raw_text)
     lines = raw_text.split('\n')
     processed_lines = []
-    current_section = ""
     
     for line in lines:
         if not line.strip(): continue
         clean_line = line.replace("**", "").replace("###", "").strip()
         
-        # 🌟 攔截幾何標記並進行 SVG 實時動態渲染 🌟
         geo_match = re.search(r'(\[GEOMETRIC:[^\]]+\])', line)
         if geo_match:
             full_marker = geo_match.group(1)
@@ -342,8 +296,7 @@ def python_layout_engine(raw_text, is_answer_key=False):
         if "班級" in clean_line or "姓名" in clean_line or "學號" in clean_line:
             processed_lines.append(f'<div class="exam-user-info">{clean_line}</div>')
             continue
-        if re.search(r'^[甲乙丙丁]部：', clean_line) or "部：" in clean_line:
-            current_section = clean_line
+        if "部：" in clean_line or "部分：" in clean_line:
             processed_lines.append(f'<div class="exam-section-header">{clean_line}</div>')
             continue
         if re.search(r'[○●]\s*[A-D]\.', line):
@@ -370,9 +323,8 @@ with col_meta1: subject = st.selectbox("選擇科目", ["數學", "中文", "英
 with col_meta2: grade = st.selectbox("選擇年級", ["小五", "小六", "小四", "小三", "小二", "小一"])
 
 st.write("##")
-st.markdown("### 🔢 設定各題型生成數量 (可調成 0 關閉該題型)")
+st.markdown("### 🔢 設定各題型生成數量 (只限 0, 5, 10, 15, 20, 25, 30)")
 col_s1, col_s2, col_s3, col_s4 = st.columns(4)
-# 🌟 所有滑桿值限制在 0, 5, 10, 15, 20, 25, 30 並移除了幾何專屬滑桿
 with col_s1: mc_count = st.slider("多項選擇題", 0, 30, 5, step=5)
 with col_s2: fill_count = st.slider("填充題", 0, 30, 5, step=5)
 with col_s3: calc_count = st.slider("列式計算題", 0, 30, 0, step=5)
@@ -381,91 +333,89 @@ with col_s4: text_count = st.slider("長題目文字題", 0, 30, 0, step=5)
 st.write("---")
 st.header("🎯 步驟二：設定出題範圍來源")
 range_mode = st.radio("範圍模式選擇：", ["提供範圍", "提供幾何工作紙模板"], horizontal=True)
+uploaded_files = st.file_uploader("上傳工作紙進行幾何智慧辨識", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
 
-uploaded_files = st.file_uploader("上傳工作紙進行智慧辨識", type=["png", "jpg", "jpeg", "pdf"], accept_multiple_files=True)
-
-st.write("##")
 if range_mode == "提供範圍":
-    if uploaded_files and st.button("🔍 點擊執行 Gemini 幾何字元提取 (OCR)", use_container_width=True):
-        with st.spinner("正在辨識幾何工作紙文字並存入保險箱..."):
-            b64_list = [convert_image_to_base64(f.getvalue()) for f in uploaded_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
-            extracted_txt = do_gemini_ocr_with_fallback(b64_list, GEMINI_TOKEN)
-            write_to_exam_vault(extracted_txt)
-            st.success("✅ 文字解鎖成功！")
-            st.rerun()
-    text_input_val = st.text_area("📝 在此修改或輸入幾何範圍核心概念：", value=current_vault_ocr, height=200, key=f"ocr_box_{vault_hash}")
+    text_input_val = st.text_area("📝 在此修改或輸入幾何範圍核心概念：", value=current_vault_ocr, height=150, key=f"ocr_box_{vault_hash}")
     if text_input_val != current_vault_ocr:
         write_to_exam_vault(text_input_val)
         current_vault_ocr = text_input_val
 else:
-    static_notice = "根據平面圓形組合幾何圖形工作紙考點"
+    static_notice = "根據平面圓形組合幾何圖形工作紙考點，計算圓心、切點、多圓重疊、長方形內切圓的半徑與直徑關係。"
     write_to_exam_vault(static_notice)
     st.text_area("📝 範圍狀態（已鎖定）：", value=static_notice, height=70, disabled=True)
 
 st.write("##")
-btn_call_ai = st.button("🚀 呼叫 AI 幾何引擎 + 綠色通道生成圖形試卷 🤖", type="secondary", use_container_width=True)
+btn_call_ai = st.button("🚀 呼叫「分批拼接不偷懶引擎」生成完整試卷 🤖", type="secondary", use_container_width=True)
 
 if btn_call_ai:
     if mc_count == 0 and fill_count == 0 and calc_count == 0 and text_count == 0:
         st.error("❌ 請至少選擇一種題型的數量大於 0！")
     else:
-        with st.spinner("🚀 幾何圖形引擎正在與 GitHub GPT-4o 進行多維度建模出題..."):
-            final_vault_text = read_from_exam_vault()
-            
-            # 🌟 自動偵測幾何圖形關鍵字
-            has_geometry_keywords = any(kw in final_vault_text for kw in ["圓", "三角", "面積", "體積"])
-            
-            geo_prompt_addon = ""
-            if has_geometry_keywords:
-                geo_prompt_addon = """
-                ⚠️【幾何圖形自動繪圖出題命令】：
-                由於目前設定的考試範圍內包含「圓、三角、面積、體積」等幾何概念，請你必須在適當的題目（特別是填充題或選擇題）中融入幾何圖案。
-                每當需要為題目配上圖形時，請在該題目文字下方單獨佔一行，並精準嵌入以下格式的幾何標記（參數數值可根據你的出題數據自由調整，但格式必須100%精準）：
-                - [GEOMETRIC:three_circles_linear:r1=6;r2=4;r3=3] (用於多圓重疊、圓心與切點連線題)
-                - [GEOMETRIC:circles_in_rectangle:w=24;h=12] (用於長方形或正方形內切雙圓題)
-                - [GEOMETRIC:concentric_overlap:d1=16] (用於大小圓重疊、同心圓或過圓心切圓題)
-                """
-            else:
-                geo_prompt_addon = "\n（本次範圍不包含幾何概念，請以普通純文字題目為主。）"
-            
-            # 精細的幾何出題提示詞，命令 AI 必須正確嵌入圖形觸發標記
-            text_prompt = f"""你是一位香港傳統小學（如喇沙、拔萃）的資深數學組組長。請為【香港小學{grade}】製作一份【{subject}科：圓形的性質與幾何組合測驗卷】。
-            
-            🎯【必須回傳的標準 JSON 物件格式】：
-            {{
-              "exam_body": "包含大標題、班級姓名欄、各部題目。",
-              "answer_body": "包含答案頁大標題、每題的詳細計算公式、幾何關係、以及最終正確答案"
-            }}
+        final_vault_text = read_from_exam_vault()
+        has_geometry = any(kw in final_vault_text for kw in ["圓", "三角", "面積", "體積"])
+        
+        geo_rule = ""
+        if has_geometry:
+            geo_rule = """
+            ⚠️ 考量到本範圍涉及幾何，你必須在題目中穿插嵌入幾何圖形標記，絕對不能漏掉。
+            圖形標記格式必須單獨佔一行：
+            - [GEOMETRIC:three_circles_linear:r1=10;r2=5;r3=7]
+            - [GEOMETRIC:circles_in_rectangle:w=24;h=12]
+            - [GEOMETRIC:concentric_overlap:d1=16]
+            """
 
-            🔢【題型數量嚴格命令】：
-            1. 多項選擇題：生成 {mc_count} 題。
-            2. 填充題：生成 {fill_count} 題。
-            3. 列式計算題：生成 {calc_count} 題。
-            4. 長題目文字題：生成 {text_count} 題。
+        # 建立分批任務
+        tasks = []
+        if mc_count > 0: tasks.append(("MC", f"第一部分：多項選擇題（共 {mc_count} 題，題號由 1 開始到 {mc_count}）", mc_count))
+        if fill_count > 0: tasks.append(("FILL", f"第二部分：填充題（共 {fill_count} 題，題號由 {mc_count+1} 開始到 {mc_count+fill_count}）", fill_count))
+        if calc_count > 0: tasks.append(("CALC", f"第三部分：列式計算題（共 {calc_count} 題，題號由 {mc_count+fill_count+1} 開始到 {mc_count+fill_count+calc_count}）", calc_count))
+        if text_count > 0: tasks.append(("TEXT", f"第四部分：長題目文字題（共 {text_count} 題，題號由 {mc_count+fill_count+calc_count+1} 開始到 {mc_count+fill_count+calc_count+text_count}）", text_count))
+
+        combined_exam = f"### 香港小學{grade}{subject}科測驗卷\n班別：__________  姓名：__________  學號：__________\n\n"
+        combined_ans = "### 🔑 答案頁與幾何解題詳解 (Answer Key)\n\n"
+        
+        progress_bar = st.progress(0.0)
+        task_step = 1.0 / len(tasks) if tasks else 1.0
+        
+        for idx, (t_type, t_title, t_num) in enumerate(tasks):
+            st.toast(f"⏳ 正在生成{t_title}... 拒絕任何省略號！", icon="📝")
             
-            幾何出題考點範例參考：
-            - 在長方形內有兩個相同的圓形緊貼內切，已知長方形長，求圓形半徑或長方形闊。
-            - 三個圓心 P, Q, R 在同一條直線上，大圓半徑為 X cm，小圓半徑為 Y cm，求中間圓或最大外切範圍直徑。
+            sub_prompt = f"""你是一位香港名校數學科組長。請為【香港小學{grade}】編寫【{subject}科】測驗卷的【{t_title}】。
             
-            {geo_prompt_addon}
+            要求：
+            1. 必須完整地生成全部 {t_num} 道題目，每一題都要寫出具體文字。
+            2. ❌ 絕對不允許使用任何 '...' 省略號，亦不准寫出『(共15題)』等偷懶字眼！
+            3. 繁體中文香港小學標準。
+            {geo_rule}
+            
+            🎯【必須回傳的 JSON 格式】：
+            {{
+              "exam_body": "### {t_title}\\n\\n這裡依序寫出第1題到第{t_num}題的題目內容...",
+              "answer_body": "### {t_title} 答案詳解\\n\\n這裡寫出對應的詳細公式與答案..."
+            }}
             """
             
-            parsed_json, used_model = call_pure_free_multiverse_ai(text_prompt)
-            
-            if parsed_json and ("exam_body" in parsed_json or "answer_body" in parsed_json):
-                ex_body = ensure_flat_string(parsed_json.get("exam_body", ""))
-                ans_body = ensure_flat_string(parsed_json.get("answer_body", ""))
-                st.session_state['generated_exam'] = ex_body
-                st.session_state['generated_answers'] = ans_body
-                st.session_state['exam_text_editor'] = ex_body
-                st.session_state['ans_text_editor'] = ans_body
-                st.success(f"🎉 幾何圖形試卷生成成功！(大腦功臣: {used_model})")
-                st.rerun()
+            res_json = call_pure_free_multiverse_ai(sub_prompt)
+            if res_json:
+                combined_exam += ensure_flat_string(res_json.get("exam_body", "")) + "\n\n"
+                combined_ans += ensure_flat_string(res_json.get("answer_body", "")) + "\n\n"
             else:
-                st.error("❌ 出題超時或配額限制，請重試。")
+                st.error(f"❌ {t_title} 生成失敗，請重試。")
+                st.stop()
+                
+            progress_bar.progress((idx + 1) * task_step)
+            time.sleep(0.5)
+
+        st.session_state['generated_exam'] = combined_exam
+        st.session_state['generated_answers'] = combined_ans
+        st.session_state['exam_text_editor'] = combined_exam
+        st.session_state['ans_text_editor'] = combined_ans
+        st.success("🎉 全套完整題目生成完畢！已成功繞過 AI 偷懶防線！")
+        st.rerun()
 
 # ==========================================
-# 4. 獨立原始碼控制台 (雙區獨立)
+# 4. 原始碼控制台
 # ==========================================
 st.write("---")
 st.header("📝 步驟三：幾何源碼調校控制台")
@@ -473,11 +423,11 @@ col_edit1, col_edit2 = st.columns(2)
 with col_edit1:
     if 'exam_text_editor' not in st.session_state: st.session_state['exam_text_editor'] = st.session_state['generated_exam']
     def on_exam_change(): st.session_state['generated_exam'] = st.session_state['exam_text_editor']
-    st.text_area("題目微調（可在這裏手動增刪 [GEOMETRIC:...] 標記變更圖形）：", height=400, key="exam_text_editor", on_change=on_exam_change)
+    st.text_area("題目微調（拒絕省略號）：", value=st.session_state['exam_text_editor'], height=350, key="exam_text_editor", on_change=on_exam_change)
 with col_edit2:
     if 'ans_text_editor' not in st.session_state: st.session_state['ans_text_editor'] = st.session_state['generated_answers']
     def on_ans_change(): st.session_state['generated_answers'] = st.session_state['ans_text_editor']
-    st.text_area("答案與詳解微調：", value=st.session_state['ans_text_editor'], height=400, key="ans_text_editor", on_change=on_ans_change)
+    st.text_area("答案與詳解微調：", value=st.session_state['ans_text_editor'], height=350, key="ans_text_editor", on_change=on_ans_change)
 
 # ==========================================
 # 5. 視覺排版與 iPad 完美打印
@@ -488,41 +438,28 @@ st.header("🎨 步驟四：印刷級幾何排版與打印導出")
 if st.session_state['generated_exam'] or st.session_state['generated_answers']:
     perfect_exam_html = python_layout_engine(st.session_state['generated_exam'], is_answer_key=False)
     perfect_ans_html = python_layout_engine(st.session_state['generated_answers'], is_answer_key=True)
-    full_html_content = perfect_exam_html + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁與幾何解題詳解 (Answer Key)</h2>' + perfect_ans_html
+    full_html_content = perfect_exam_html + '<div class="page-break"></div>' + perfect_ans_html
     
-    col_btn1, col_btn2 = st.columns(2)
-    with col_btn1: st.button("🔄 同步更新幾何視覺排版", type="secondary", use_container_width=True)
-    with col_btn2: trigger_print = st.button("🖨️ 手提電腦：立即列印 / 匯出", type="secondary", use_container_width=True)
-        
+    trigger_print = st.button("🖨️ 立即啟動手提電腦列印", type="secondary", use_container_width=True)
     auto_print_js = "window.print();" if trigger_print else ""
 
     html_for_printing = f"""
     <!DOCTYPE html>
-    <html style="background-color: white !important; color: black !important;">
+    <html>
     <head>
     <meta charset="utf-8">
     <style>
         html, body {{ background-color: white !important; color: #000000 !important; -webkit-text-fill-color: #000000 !important; }}
         #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif; padding: 20px; font-size: 16px; line-height: 2.3; }}
-        .exam-title-main {{ font-size: 26px !important; font-weight: 800 !important; text-align: center !important; margin-top: 20px !important; margin-bottom: 15px !important; color: #000000 !important; }}
-        .exam-user-info {{ font-size: 17px !important; font-weight: bold !important; text-align: center !important; margin-bottom: 30px !important; word-spacing: 12px; color: #000000 !important; }}
-        .exam-section-header {{ font-size: 19px !important; font-weight: 800 !important; color: #000000 !important; margin-top: 25px !important; margin-bottom: 12px !important; border-left: 5px solid #000 !important; padding-left: 10px; }}
-        
-        .fill-blank-underline {{
-            display: inline-block;
-            width: 180px;
-            border-bottom: 1.5px solid #000000 !important;
-            margin: 0 10px;
-            height: 18px;
-            vertical-align: bottom;
-        }}
+        .exam-title-main {{ font-size: 26px !important; font-weight: 800 !important; text-align: center !important; margin-top: 20px !important; margin-bottom: 15px !important; }}
+        .exam-user-info {{ font-size: 17px !important; font-weight: bold !important; text-align: center !important; margin-bottom: 30px !important; word-spacing: 12px; }}
+        .exam-section-header {{ font-size: 19px !important; font-weight: 800 !important; margin-top: 25px !important; margin-bottom: 12px !important; border-left: 5px solid #000 !important; padding-left: 10px; }}
+        .fill-blank-underline {{ display: inline-block; width: 150px; border-bottom: 1.5px solid #000 !important; margin: 0 10px; height: 18px; vertical-align: bottom; }}
         .v-frac {{ display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; line-height: 1.0; padding: 0 4px; font-size: 0.85em; }}
-        .v-frac .num {{ border-bottom: 1.5px solid #000000; padding-bottom: 2px; min-width: 14px; }}
+        .v-frac .num {{ border-bottom: 1.5px solid #000; padding-bottom: 2px; min-width: 14px; }}
         .v-frac .den {{ padding-top: 2px; min-width: 14px; }}
-        .mc-option {{ margin-left: 20px; margin-top: 6px; margin-bottom: 6px; display: block !important; color: #000000 !important; }}
+        .mc-option {{ margin-left: 20px; margin-top: 6px; margin-bottom: 6px; display: block !important; }}
         .page-break {{ page-break-before: always; }}
-        .ans-header {{ color: #ff4b4b !important; border-bottom: 2px solid #ff4b4b !important; padding-bottom: 10px; margin-top: 35px; font-size: 23px; text-align: center; }}
-        @media print {{ html, body {{ background-color: white; color: #000000; -webkit-print-color-adjust: exact !important; }} }}
     </style>
     </head>
     <body>
@@ -532,12 +469,10 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
     </html>
     """
 
-    st.info("💡 **iPad / iPhone 完美跨頁打印提示**：\n請點擊下方大按鈕將包含【精準 SVG 幾何圖】的考卷下載至 iPad。點開檔案後即可完美分頁列印或導出 PDF，圖形線條絕對清晰不模糊！")
-    
     st.download_button(
-        label="📲 iPad 專用：下載完整 HTML 幾何圖形列印檔",
+        label="📲 iPad 專用：下載無省略、高精細幾何 HTML 列印檔",
         data=html_for_printing,
-        file_name=f"香港小學{grade}_幾何組合試卷.html",
+        file_name=f"香港小學{grade}_無省略幾何試卷.html",
         mime="text/html",
         use_container_width=True,
         type="primary"
@@ -545,6 +480,4 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
 
     st.write("##")
     import streamlit.components.v1 as components
-    components.html(html_for_printing, height=1400, scrolling=True)
-else:
-    st.info("💡 請先在上方的步驟二生成或提供題目數據。")
+    components.html(html_for_printing, height=1200, scrolling=True)
