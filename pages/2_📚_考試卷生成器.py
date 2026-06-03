@@ -192,32 +192,14 @@ def ensure_flat_string(val):
     return str(val)
 
 # ==========================================
-# 🛡️ 智慧純免費失敗故障輪替鏈 (Google 3路 + GitHub 綠色通道 GPT-4o)
+# 🛡️ 智慧純免費出題：GitHub 綠色通道 GPT-4o (100% 繞過 Gemini)
 # ==========================================
-def call_pure_free_multiverse_ai(payload_template, text_prompt):
+def call_pure_free_multiverse_ai(text_prompt):
     """
-    純免費防線：Gemini 2.5 Flash -> Gemini 2.5 Pro -> Gemini 3 Flash -> GitHub 綠色通道 GPT-4o
+    題目生成：100% 僅調用 GitHub 綠色通道 GPT-4o (使用 AI_TOKEN)
     """
-    # 1. 第一階段：Google 三路免費通道
-    gemini_models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash"]
-    
-    for g_model in gemini_models:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={GEMINI_TOKEN}"
-        try:
-            res = requests.post(url, headers={"Content-Type": "application/json"}, json=payload_template, timeout=60)
-            if res.status_code == 200:
-                raw_text = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
-                # 累加計數
-                c_type = "main" if g_model == "gemini-2.5-flash" else "backup"
-                increment_github_counter(c_type)
-                return json.loads(raw_text), g_model
-        except:
-            pass
-        st.toast(f"⚠️ Google {g_model} 免費通道配額耗盡，無感切換中...", icon="🔄")
-
-    # 2. 第二階段：GitHub 綠色通道 (極佳保底，使用 AI_TOKEN)
     if AI_TOKEN:
-        st.toast("🚀 正在啟動終極免費防禦線：GitHub 綠色通道 GPT-4o...", icon="⚡")
+        st.toast("🚀 正在啟用 GitHub 綠色通道：GPT-4o 題目生成...", icon="⚡")
         url = "https://models.inference.ai.azure.com/chat/completions"
         headers = {
             "Authorization": f"Bearer {AI_TOKEN}",
@@ -240,16 +222,18 @@ def call_pure_free_multiverse_ai(payload_template, text_prompt):
                 raw_content = re.sub(r'^```json\s*', '', raw_content)
                 raw_content = re.sub(r'\s*```$', '', raw_content).strip()
                 
-                # 併入後備計數器統計中
+                # 併入後備計數器統計中 (GitHub 綠色通道對應後備進度條)
                 increment_github_counter("backup")
                 return json.loads(raw_content), "github-gpt-4o"
-        except:
-            pass
+            else:
+                st.toast(f"⚠️ GitHub 綠色通道接口回應異常: {res.status_code}", icon="❌")
+        except Exception as e:
+            st.toast(f"⚠️ GitHub 綠色通道請求失敗: {str(e)}", icon="❌")
 
     return None, None
 
 # ==========================================
-# 2. 輔助函式：圖片處理 & OCR 保底
+# 2. 輔助函式：圖片處理 & OCR 保底 (100% 僅調用 Gemini)
 # ==========================================
 def convert_image_to_base64(file_val):
     image = Image.open(io.BytesIO(file_val))
@@ -273,6 +257,8 @@ def do_gemini_ocr_with_fallback(b64_list, gemini_token):
             res = requests.post(api_url, headers={"Content-Type": "application/json"}, json=payload, timeout=40)
             if res.status_code == 200:
                 st.toast(f"📸 OCR 成功調用模型：{model_id}", icon="✅")
+                # OCR 成功調用 Gemini，計入主攻通道 (Flash)
+                increment_github_counter("main")
                 return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
         except:
             continue
@@ -312,7 +298,7 @@ def python_layout_engine(raw_text, is_answer_key=False):
         if not line.strip(): continue
         clean_line = line.replace("**", "").replace("###", "").strip()
         
-        if "數學科測驗" in clean_line or "數學科考試" in clean_line or ("考試" in clean_line and "部" not in clean_line and "題" not in clean_line and len(clean_line) < 35):
+        if "數學科測驗" in clean_line or "數學科考試" in clean_line or ("考試" in clean_line and "部" not in clean_line and "题" not in clean_line and len(clean_line) < 35):
             processed_lines.append(f'<div class="exam-title-main">{clean_line}</div>')
             continue
             
@@ -359,7 +345,7 @@ with col_meta1: subject = st.selectbox("選擇科目", ["中文", "英文", "數
 with col_meta2: grade = st.selectbox("選擇年級", ["小一", "小二", "小三", "小四", "小五", "小六"])
 
 st.write("##")
-st.markdown("### 🔢 設定各題型生成數量")
+st.markdown("### 🔢 設定各題型生成數量 (可調成 0 表示該題型不需出題)")
 col_s1, col_s2, col_s3, col_s4 = st.columns(4)
 with col_s1: mc_count = st.slider("多項選擇題 (題數)", 0, 30, 5, step=5)
 with col_s2: fill_count = st.slider("填充題 (題數)", 0, 30, 5, step=5)
@@ -404,12 +390,15 @@ st.write("##")
 btn_call_ai = st.button("🚀 呼叫 AI 免費多通道生成新題目 🤖", type="secondary", use_container_width=True)
 
 if btn_call_ai:
+    # 這裡的防護：只有在「所有滑桿都調到 0」的情況下才會阻擋。任一題型大於 0（其餘為 0）是完全允許的！
     if mc_count == 0 and fill_count == 0 and calc_count == 0 and text_count == 0:
         st.error("❌ 請至少將一項題型的滑桿調大於 0！")
     else:
-        with st.spinner("🚀 正在連動多路純免費大腦鏈條，全力出題中..."):
+        with st.spinner("🚀 正在連動 GitHub 綠色通道 GPT-4o，全力出題中..."):
             contents = []
             final_vault_text = read_from_exam_vault()
+            
+            # 設定個別題型的指令，如果是 0 則明確命令不要生成
             mc_instruction = f"必須剛好生成【{mc_count}】題。" if mc_count > 0 else "不要出 any 多項選擇題，甲部留空。"
             fill_instruction = f"必須剛好生成【{fill_count}】題。" if fill_count > 0 else "不要出 any 填充題，乙部留空。"
             calc_instruction = f"必須剛好生成【{calc_count}】題。" if calc_count > 0 else "不要出 any 列式計算題，丙部留空。"
@@ -429,23 +418,8 @@ if btn_call_ai:
             else:
                 text_prompt += f"\n🎯【出題內容命令】：請精準看懂提供之圖片工作紙考點，出一套相似且全新的題目！\n"
             
-            payload_template = {
-                "contents": [{"parts": [{"text": text_prompt}]}],
-                "generationConfig": {
-                    "responseMimeType": "application/json",
-                    "responseSchema": {
-                        "type": "OBJECT",
-                        "properties": {
-                            "exam_body": {"type": "STRING"},
-                            "answer_body": {"type": "STRING"}
-                        },
-                        "required": ["exam_body", "answer_body"]
-                    }
-                }
-            }
-            
-            # 🌟 啟動 Google 三路免費模型鏈 ＆ GitHub Models (GPT-4o) 綠色通道
-            parsed_json, used_model = call_pure_free_multiverse_ai(payload_template, text_prompt)
+            # 🌟 僅呼叫 GitHub 綠色通道 GPT-4o
+            parsed_json, used_model = call_pure_free_multiverse_ai(text_prompt)
             
             try:
                 if parsed_json and ("exam_body" in parsed_json or "answer_body" in parsed_json):
@@ -463,7 +437,7 @@ if btn_call_ai:
                     st.success(f"🎉 試卷由純免費通道生成成功！(最終調用功臣大腦: {used_model})")
                     st.rerun()
                 else:
-                    st.error("❌ 全線 AI 純免費通道（Google 3路 ＆ GitHub 綠色通道）今日配額均已用盡！請等候 Reset 重置後再試。")
+                    st.error("❌ GitHub 綠色通道今日配額已用盡或連線超時！請等候 Reset 重置後再試。")
             except Exception as e: 
                 st.error(f"❌ 解析免費數據結構失敗。原因: {str(e)}")
 
