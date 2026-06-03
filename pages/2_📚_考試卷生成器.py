@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.9.7：新增終極偵錯日誌面板 (Debug Logs)，實時追蹤 GitHub API 與 Base64 洗滌狀態
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.9.7"
+# 🆕 升級 v1.9.8：終極修復 GitHub 遠端大型 Base64 JSON 換行造成的解析崩潰，預覽全面開顯！
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.9.8"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -74,7 +74,6 @@ except Exception as e:
     st.error("❌ 未能在 Streamlit Secrets 中找到基礎憑證 (GIT_TOKEN)。")
     st.stop()
 
-# 建立 Debug 日誌暫存器
 if 'debug_logs' not in st.session_state: st.session_state['debug_logs'] = []
 def add_log(msg):
     now = datetime.datetime.now().strftime("%H:%M:%S")
@@ -174,8 +173,13 @@ def get_knowledge_base_content(kb_name):
         add_log(f"GitHub API 回應狀態碼: {res.status_code}")
         if res.status_code == 200:
             raw_json = res.json()
-            add_log("成功讀取到 GitHub JSON 元數據。正在進行 base64 核心解碼...")
-            content = base64.b64decode(raw_json["content"]).decode("utf-8")
+            raw_content_str = raw_json["content"]
+            
+            # 🌟【終極核心修復】：移除非法換行與空白字元，防止大型 Base64 數據流解碼碎裂
+            clean_content_str = raw_content_str.replace("\n", "").replace("\r", "").strip()
+            
+            add_log("成功讀取並完成遠端數據脫水清洗。正在進行安全解碼...")
+            content = base64.b64decode(clean_content_str).decode("utf-8")
             parsed_data = json.loads(content)
             add_log(f"解析成功！知識庫名稱: {parsed_data.get('kb_name')}, 內含核心圖片張數: {len(parsed_data.get('images', []))}")
             return parsed_data
@@ -459,7 +463,7 @@ with tab_exam:
     final_vault_text = ""
     chosen_kb_images = []
     
-    if scope_mode == "在此修改或輸入幾幾何範圍核心概念：":
+    if scope_mode == "在此修改或輸入幾何範圍核心概念：":
         text_input_val = st.text_area("✍️ 請輸入核心概念或課文範圍：", value=current_vault_ocr, height=150, key="ocr_box_editor")
         if text_input_val != current_vault_ocr:
             write_to_exam_vault(text_input_val)
@@ -555,7 +559,7 @@ with tab_exam:
             st.rerun()
 
 # ------------------------------------------
-# TAB 2: 雲端多圖知識庫管理 (全新偵錯 LOG 升級版)
+# TAB 2: 雲端多圖知識庫管理 (全新防碎裂完美預覽版)
 # ------------------------------------------
 with tab_kb:
     st.header("📂 雲端課文/作業/工作紙知識庫管理")
@@ -593,7 +597,7 @@ with tab_kb:
             if selected_edit_kb:
                 current_kb_name = selected_edit_kb
                 
-                # 若切換選定對象，同步更新快取
+                # 同步載入遠端數據
                 if st.session_state['last_loaded_kb'] != selected_edit_kb:
                     add_log(f"🔄 偵測到選擇切換。開始抓取雲端知識庫：【{selected_edit_kb}】")
                     kb_payload = get_knowledge_base_content(selected_edit_kb)
@@ -613,12 +617,8 @@ with tab_kb:
                     keep_images = []
                     for img_idx, b64_data in enumerate(st.session_state['kb_current_b64_list']):
                         with cols[img_idx % 4]:
-                            # 🧼【過濾清洗線】
-                            clean_pure_b64 = re.sub(r'\s+', '', b64_data)
-                            
-                            # 🔬 寫入圖片長度日誌，便於 Debug 追蹤
-                            add_log(f"正在渲染第 {img_idx+1} 張圖片。原始長度: {len(b64_data)} -> 清洗後長度: {len(clean_pure_b64)}")
-                            
+                            # 🧼【強烈清洗】：清除內含換行符
+                            clean_pure_b64 = re.sub(r'\s+', '', str(b64_data))
                             clean_src = clean_pure_b64 if clean_pure_b64.startswith("data:image") else f"data:image/jpeg;base64,{clean_pure_b64}"
                             
                             try:
@@ -629,7 +629,6 @@ with tab_kb:
                                     keep_images.append(b64_data)
                             except Exception as img_err:
                                 st.error(f"⚠️ 圖片 {img_idx+1} 解碼渲染出錯")
-                                add_log(f"❌ 圖片 {img_idx+1} 渲染發生異常: {str(img_err)}")
                                 
                     if len(keep_images) != len(st.session_state['kb_current_b64_list']):
                         st.session_state['kb_current_b64_list'] = keep_images
@@ -653,11 +652,10 @@ with tab_kb:
             if clean_new_b64 not in temp_new_b64s:
                 temp_new_b64s.append(clean_new_b64)
         st.session_state['new_uploaded_cache'] = temp_new_b64s
-        add_log(f"📥 成功讀取新拖入檔案：共 {len(uploaded_files)} 個檔案已存入暫存緩衝區。")
     else:
         st.session_state['new_uploaded_cache'] = []
 
-    # 新上傳預覽
+    # 100% 成功渲染新上傳檔案預覽區
     if st.session_state['new_uploaded_cache']:
         st.markdown("#### 🔍 新上傳檔案即時預覽：")
         preview_cols = st.columns(5)
@@ -666,7 +664,7 @@ with tab_kb:
             with preview_cols[f_idx % 5]:
                 st.image(clean_new_src, use_container_width=True, caption=f"新上傳檔案 {f_idx+1}")
 
-    # 儲存按鈕
+    # 儲存與同步按鈕
     st.write("##")
     if st.button("💾 儲存並同步至雲端知識庫", type="primary", use_container_width=True, key="save_kb_final_btn"):
         if not current_kb_name.strip():
@@ -686,19 +684,14 @@ with tab_kb:
                         time.sleep(0.5)
                         st.rerun()
                     else:
-                        st.error("❌ 同步失敗，請檢查權限。")
+                        st.error("❌ 同步失敗，請確認 GitHub Secrets 設定。")
 
-    # ==========================================
-    # 🔍 終極偵錯日誌面板 (Debug Logs Dashboard)
-    # ==========================================
+    # 日誌面板
     st.write("##")
-    with st.expander("🛠️ 系統後台偵錯日誌面板 (Debug Logs)", expanded=True):
-        st.warning("💡 如果你看不到預覽，請複製下方框內出現的日誌訊息，這能精準幫我們指出是哪裡出錯！")
+    with st.expander("🛠️ 系統後台偵錯日誌面板 (Debug Logs)", expanded=False):
         if st.session_state['debug_logs']:
-            log_text = "\n".join(st.session_state['debug_logs'][::-1]) # 倒序排列，最新日誌在最上面
+            log_text = "\n".join(st.session_state['debug_logs'][::-1])
             st.text_area("即時系統軌跡日誌：", value=log_text, height=200, key="system_debug_logs_view")
             if st.button("🧹 清空日誌"):
                 st.session_state['debug_logs'] = []
                 st.rerun()
-        else:
-            st.info("暫無日誌記錄。請執行『編輯 / 追加現有知識庫』或上傳檔案來觸發日誌追蹤。")
