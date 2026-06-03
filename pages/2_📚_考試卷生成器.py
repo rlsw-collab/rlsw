@@ -486,5 +486,3 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
     """
     import streamlit.components.v1 as components
     components.html(html_for_printing, height=1200, scrolling=True)
-
-你現在可以點擊右上角的 **「Copy」** 將代碼完美覆蓋到 `pages/2_📚_考試卷生成器.py` 了！👍
