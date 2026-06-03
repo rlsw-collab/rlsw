@@ -14,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.5.7：純免費特攻版 (OCR 專用 Gemini / 題目生成專用 GitHub Green GPT-4o)
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.5.7"
+# 🆕 升級 v1.5.8：純免費特攻版 (Google 3路免費大腦 + GitHub 綠色通道 GPT-4o 終極防線 + iPad OS 列印優化)
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.5.8"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -73,7 +73,7 @@ st.markdown("""
 try:
     GITHUB_TOKEN = st.secrets["GIT_TOKEN"]
     GEMINI_TOKEN = st.secrets["GEMINI_TOKEN"]
-    AI_TOKEN = st.secrets.get("AI_TOKEN", "") # GitHub Models 綠色通道專用 Key
+    AI_TOKEN = st.secrets.get("AI_TOKEN", "") # 默書工具用的 GitHub Key，用來開闢 GitHub 免費 Models 綠色通道
     GITHUB_REPO = "rlsw"
     GITHUB_USER = "rlsw-collab"
 except Exception as e:
@@ -94,7 +94,7 @@ def read_from_exam_vault():
     path = get_exam_vault_path()
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
-## ==========================================
+# ==========================================
 # 🛡️ GitHub 雲端實時計數同步邏輯 (防衝突 ＆ 安全自癒)
 # ==========================================
 def get_hkt_date_str():
@@ -131,7 +131,7 @@ def increment_github_counter(counter_type):
                 counter = default_counter
                 sha = None
                 
-            # 安全自癒機制，防缺失欄位崩潰
+            # 安全自癒：如果舊 JSON 缺少新欄位，自動初始化它，防止 KeyError 崩潰
             if "exam_tool" not in counter:
                 counter["exam_tool"] = {"main": 0, "backup": 0}
             if "dictation_tool" not in counter:
@@ -142,6 +142,7 @@ def increment_github_counter(counter_type):
                 counter["exam_tool"] = {"main": 0, "backup": 0}
                 counter["dictation_tool"] = {"main": 0, "backup": 0}
                 
+            # 累加計數至試卷生成專屬欄位
             counter["exam_tool"][counter_type] += 1
             
             content_str = json.dumps(counter, indent=2)
@@ -162,7 +163,7 @@ def increment_github_counter(counter_type):
             st.toast(f"⚠️ 雲端計數器同步失敗: {str(e)}", icon="❌")
             time.sleep(0.5)
 
-## ==========================================
+# ==========================================
 # 🧠 結構化 JSON 欄位修補與安全展平防護器
 # ==========================================
 def ensure_flat_string(val):
@@ -190,55 +191,65 @@ def ensure_flat_string(val):
         return "\n".join(lines)
     return str(val)
 
-## ==========================================
-# 🛡️ 題目生成：100% 專用 GitHub Green 通道 GPT-4o 旗艦引擎
 # ==========================================
-def call_github_green_gpt4o_generation(text_prompt):
+# 🛡️ 智慧純免費失敗故障輪替鏈 (Google 3路 + GitHub 綠色通道 GPT-4o)
+# ==========================================
+def call_pure_free_multiverse_ai(payload_template, text_prompt):
     """
-    題目生成完全不浪費 Gemini，直接使用 GitHub 綠色通道免費調用 GPT-4o，安全保底
+    純免費防線：Gemini 2.5 Flash -> Gemini 2.5 Pro -> Gemini 3 Flash -> GitHub 綠色通道 GPT-4o
     """
-    if not AI_TOKEN:
-        st.error("❌ 找不到 AI_TOKEN，無法開啟 GitHub 綠色通道。")
-        return None
+    # 1. 第一階段：Google 三路免費通道
+    gemini_models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash"]
+    
+    for g_model in gemini_models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={GEMINI_TOKEN}"
+        try:
+            res = requests.post(url, headers={"Content-Type": "application/json"}, json=payload_template, timeout=60)
+            if res.status_code == 200:
+                raw_text = res.json()['candidates'][0]['content']['parts'][0]['text'].strip()
+                # 累加計數
+                c_type = "main" if g_model == "gemini-2.5-flash" else "backup"
+                increment_github_counter(c_type)
+                return json.loads(raw_text), g_model
+        except:
+            pass
+        st.toast(f"⚠️ Google {g_model} 免費通道配額耗盡，無感切換中...", icon="🔄")
 
-    st.toast("🚀 啟用 GitHub 綠色通道：GPT-4o 頂規試卷生成中...", icon="⚡")
-    url = "https://models.inference.ai.azure.com/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {AI_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    github_payload = {
-        "model": "gpt-4o",
-        "messages": [
-            {
-                "role": "system", 
-                "content": "You are a professional JSON output assistant. You must return a JSON object with exactly two fields 'exam_body' and 'answer_body'. Both fields MUST be pure flat strings containing standard text formatting with explicit literal newlines (\\n). DO NOT output nested dictionaries or lists under these fields."
-            },
-            {"role": "user", "content": text_prompt}
-        ],
-        "response_format": {"type": "json_object"},
-        "temperature": 0.3
-    }
-    try:
-        res = requests.post(url, headers=headers, json=github_payload, timeout=85)
-        if res.status_code == 200:
-            raw_content = res.json()['choices'][0]['message']['content'].strip()
-            # 預防性清洗 markdown 符號
-            raw_content = re.sub(r'^```json\s*', '', raw_content)
-            raw_content = re.sub(r'\s*```$', '', raw_content).strip()
-            
-            # GPT-4o 屬於強大後備引擎，寫入後備計數器
-            increment_github_counter("backup")
-            return json.loads(raw_content), "github-gpt-4o"
-        else:
-            st.error(f"❌ GitHub 綠色通道錯誤：狀態碼 {res.status_code} - {res.text}")
-    except Exception as e:
-        st.error(f"❌ 呼叫 GitHub 綠色通道異常：{str(e)}")
+    # 2. 第二階段：GitHub 綠色通道 (極佳保底，使用 AI_TOKEN)
+    if AI_TOKEN:
+        st.toast("🚀 正在啟動終極免費防禦線：GitHub 綠色通道 GPT-4o...", icon="⚡")
+        url = "https://models.inference.ai.azure.com/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {AI_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        github_payload = {
+            "model": "gpt-4o",
+            "messages": [
+                {"role": "system", "content": "You are a professional JSON output assistant. You must return a strict JSON object with fields 'exam_body' and 'answer_body' without any markdown block formatting. Do not output nested dictionaries or lists under these fields."},
+                {"role": "user", "content": text_prompt}
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0.3
+        }
+        try:
+            res = requests.post(url, headers=headers, json=github_payload, timeout=75)
+            if res.status_code == 200:
+                raw_content = res.json()['choices'][0]['message']['content'].strip()
+                # 預防性清洗 markdown 符號
+                raw_content = re.sub(r'^```json\s*', '', raw_content)
+                raw_content = re.sub(r'\s*```$', '', raw_content).strip()
+                
+                # 併入後備計數器統計中
+                increment_github_counter("backup")
+                return json.loads(raw_content), "github-gpt-4o"
+        except:
+            pass
 
     return None, None
 
 # ==========================================
-# 2. 輔助函式：圖片處理 & OCR 保底 (100% 專用 Gemini)
+# 2. 輔助函式：圖片處理 & OCR 保底
 # ==========================================
 def convert_image_to_base64(file_val):
     image = Image.open(io.BytesIO(file_val))
@@ -248,9 +259,6 @@ def convert_image_to_base64(file_val):
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
 def do_gemini_ocr_with_fallback(b64_list, gemini_token):
-    """
-    OCR 文字識別：100% 僅用 Google Gemini 免費 3路通道 (不調用 Github Green 通道)
-    """
     prompt = "你是一個100%精準的繁體中文與英文打字掃描儀。請一字不漏、按照段落順序將圖片中的所有教學課文 and 題目文字抄寫下來。直接輸出純文字，不要加入任何解釋。"
     parts = [{"text": prompt}]
     for b64 in b64_list:
@@ -265,15 +273,12 @@ def do_gemini_ocr_with_fallback(b64_list, gemini_token):
             res = requests.post(api_url, headers={"Content-Type": "application/json"}, json=payload, timeout=40)
             if res.status_code == 200:
                 st.toast(f"📸 OCR 成功調用模型：{model_id}", icon="✅")
-                # 同步計數器
-                c_type = "main" if model_id == "gemini-2.5-flash" else "backup"
-                increment_github_counter(c_type)
                 return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
         except:
             continue
     return "❌ 圖片辨識失敗，所有 Google 免費通道均超時，請稍候重試或手動輸入。"
 
-## ==========================================
+# ==========================================
 # 🚀 🚀 Python 終極分數與視覺排版引擎 🚀 🚀
 # ==========================================
 def convert_to_vertical_fractions(text_content):
@@ -339,7 +344,7 @@ def python_layout_engine(raw_text, is_answer_key=False):
         
     return "\n".join(processed_lines)
 
-## ==========================================
+# ==========================================
 # 3. Streamlit 網頁佈局
 # ==========================================
 if 'generated_exam' not in st.session_state: st.session_state['generated_exam'] = ""
@@ -378,7 +383,6 @@ if uploaded_files:
 
 st.write("##")
 if range_mode == "提供範圍":
-    # OCR 完全使用 Gemini (Gemini Flash/Pro/3-Flash)
     if uploaded_files and st.button("🔍 點擊執行 Gemini 圖片字元識別 (OCR)", use_container_width=True):
         with st.spinner("正在將圖片文字提取並寫入實體保險箱..."):
             b64_list = [convert_image_to_base64(f.getvalue()) for f in uploaded_files if f.name.lower().endswith(('png', 'jpg', 'jpeg'))]
@@ -396,15 +400,14 @@ else:
     st.text_area("📝 範圍狀態（已鎖定）：", value=static_notice, height=70, disabled=True)
 
 st.write("##")
-
-## 🚀 點擊生成：100% 呼叫 GitHub 綠色通道 (GPT-4o) 出題
-btn_call_ai = st.button("🚀 呼叫 AI 綠色通道生成新題目 🤖", type="secondary", use_container_width=True)
+# 🚀 完美正名：更名為多通道生成
+btn_call_ai = st.button("🚀 呼叫 AI 免費多通道生成新題目 🤖", type="secondary", use_container_width=True)
 
 if btn_call_ai:
     if mc_count == 0 and fill_count == 0 and calc_count == 0 and text_count == 0:
         st.error("❌ 請至少將一項題型的滑桿調大於 0！")
     else:
-        with st.spinner("🚀 正在啟用 GitHub 綠色通道，調動 GPT-4o 思考出題中..."):
+        with st.spinner("🚀 正在連動多路純免費大腦鏈條，全力出題中..."):
             contents = []
             final_vault_text = read_from_exam_vault()
             mc_instruction = f"必須剛好生成【{mc_count}】題。" if mc_count > 0 else "不要出 any 多項選擇題，甲部留空。"
@@ -426,12 +429,27 @@ if btn_call_ai:
             else:
                 text_prompt += f"\n🎯【出題內容命令】：請精準看懂提供之圖片工作紙考點，出一套相似且全新的題目！\n"
             
-            # 🌟 專屬呼叫：不走 Gemini，直接使用 AI_TOKEN 走 GitHub Green 綠色通道呼叫 GPT-4o
-            parsed_json, used_model = call_github_green_gpt4o_generation(text_prompt)
+            payload_template = {
+                "contents": [{"parts": [{"text": text_prompt}]}],
+                "generationConfig": {
+                    "responseMimeType": "application/json",
+                    "responseSchema": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "exam_body": {"type": "STRING"},
+                            "answer_body": {"type": "STRING"}
+                        },
+                        "required": ["exam_body", "answer_body"]
+                    }
+                }
+            }
+            
+            # 🌟 啟動 Google 三路免費模型鏈 ＆ GitHub Models (GPT-4o) 綠色通道
+            parsed_json, used_model = call_pure_free_multiverse_ai(payload_template, text_prompt)
             
             try:
                 if parsed_json and ("exam_body" in parsed_json or "answer_body" in parsed_json):
-                    # 🌟 安全防禦核心：調用 ensure_flat_string 把可能發生的 nested-dictionary 降維並無損拍平成 str 
+                    # 🌟 透過安全展平防禦，確保絕不發生 dict attribute replace 崩潰
                     ex_raw = parsed_json.get("exam_body", "")
                     ans_raw = parsed_json.get("answer_body", "")
                     
@@ -442,14 +460,14 @@ if btn_call_ai:
                     st.session_state['generated_answers'] = ans_body
                     st.session_state['exam_text_editor'] = ex_body
                     st.session_state['ans_text_editor'] = ans_body
-                    st.success(f"🎉 試卷由 GitHub 綠色通道 GPT-4o 生成成功！")
+                    st.success(f"🎉 試卷由純免費通道生成成功！(最終調用功臣大腦: {used_model})")
                     st.rerun()
                 else:
-                    st.error("❌ 綠色通道出題未能生成成功，請檢查 AI_TOKEN 是否設定正確或已被限制。")
+                    st.error("❌ 全線 AI 純免費通道（Google 3路 ＆ GitHub 綠色通道）今日配額均已用盡！請等候 Reset 重置後再試。")
             except Exception as e: 
-                st.error(f"❌ 解析出題 JSON 數據結構失敗。原因: {str(e)}")
+                st.error(f"❌ 解析免費數據結構失敗。原因: {str(e)}")
 
-## ==========================================
+# ==========================================
 # 3. 獨立原始碼控制台 (雙區獨立)
 # ==========================================
 st.write("---")
@@ -466,25 +484,27 @@ with col_edit2:
     def on_ans_change(): st.session_state['generated_answers'] = st.session_state['ans_text_editor']
     st.text_area("答案微調：", value=st.session_state['ans_text_editor'], height=450, key="ans_text_editor", on_change=on_ans_change)
 
-## ==========================================
+# ==========================================
 # 4. 視覺排版與控制台
 # ==========================================
 st.write("---")
 st.header("🎨 步驟四：視覺排版與打印導出")
 
-col_btn1, col_btn2 = st.columns(2)
-with col_btn1:
-    btn_render = st.button("🔄 點擊執行 Python 引擎，更新視覺排版", type="secondary", use_container_width=True)
-with col_btn2:
-    trigger_print = st.button("🖨️ 立即列印本試卷 / 匯出 PDF", type="secondary", use_container_width=True)
-
 if st.session_state['generated_exam'] or st.session_state['generated_answers']:
-    st.write("##")
     perfect_exam_html = python_layout_engine(st.session_state['generated_exam'], is_answer_key=False)
     perfect_ans_html = python_layout_engine(st.session_state['generated_answers'], is_answer_key=True)
     full_html_content = perfect_exam_html + '<div class="page-break"></div><h2 class="ans-header">🔑 答案頁 (Answer Key)</h2>' + perfect_ans_html
-    auto_print_js = "window.print();" if trigger_print else ""
     
+    # 建立電腦版即時打印呼叫，若在 iPad 上則提供專屬獨立 HTML 導出
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        btn_render = st.button("🔄 點擊執行 Python 引擎，更新視覺排版", type="secondary", use_container_width=True)
+    with col_btn2:
+        trigger_print = st.button("🖨️ 手提電腦專用：立即列印 / 匯出 PDF", type="secondary", use_container_width=True)
+        
+    auto_print_js = "window.print();" if trigger_print else ""
+
+    # 編譯完整 HTML 打印文檔架構
     html_for_printing = f"""
     <!DOCTYPE html>
     <html style="background-color: white !important; color: black !important; color-scheme: light !important;">
@@ -517,5 +537,21 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
     </body>
     </html>
     """
+
+    # iPad 專屬一鍵破解 WebKit Iframe 打印缺陷之安全下載通道
+    st.info("💡 **iPad / iPhone / 手機 Chrome 打印提示**：\niOS 系統（WebKit 內核限制）會強行鎖死網頁內嵌框架（Iframe），導致直接列印時只會出現 Page 1。\n\n請點擊下方**下載專屬 HTML 檔案**，在 iPad 下載點開後，即可進行完美的多頁列印與 PDF 匯出！")
+    
+    st.download_button(
+        label="📲 iPad / 手提裝置專用：下載完整 HTML 列印檔",
+        data=html_for_printing,
+        file_name=f"香港小學{grade}_{subject}_試卷.html",
+        mime="text/html",
+        use_container_width=True,
+        type="primary"
+    )
+
+    st.write("##")
     import streamlit.components.v1 as components
     components.html(html_for_printing, height=1200, scrolling=True)
+else:
+    st.info("💡 請先在上方的步驟二生成或提供題目數據。")
