@@ -3,8 +3,6 @@ import os
 import re
 import base64
 import requests
-import datetime
-import json  # 🌟 補齊原本漏掉的 json 庫，防計數器崩潰
 from PIL import Image
 import io
 import streamlit as st
@@ -38,70 +36,6 @@ def write_to_vault(text):
 def read_from_vault():
     path = get_user_vault_path()
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
-
-# ==========================================
-# 🛡️ GitHub 雲端實時計數同步邏輯
-# ==========================================
-def get_hkt_date_str():
-    tz_hkt = datetime.timezone(datetime.timedelta(hours=8))
-    return datetime.datetime.now(tz_hkt).strftime("%Y-%m-%d")
-
-def increment_github_counter(counter_type):
-    path = "usage_counter.json"
-    url = f"https://api.github.com/repos/{GH_USER}/{GH_REPO}/contents/{path}"
-    headers = {
-        "Authorization": f"token {GIT_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    
-    today_str = get_hkt_date_str()
-    default_counter = {
-        "last_reset_date": today_str,
-        "exam_tool": {"main": 0, "backup": 0},
-        "dictation_tool": {"main": 0, "backup": 0}
-    }
-    
-    for attempt in range(3):
-        try:
-            res = requests.get(url, headers=headers)
-            if res.status_code == 200:
-                data = res.json()
-                content = base64.b64decode(data["content"]).decode("utf-8")
-                counter = json.loads(content)
-                sha = data["sha"]
-            else:
-                counter = default_counter
-                sha = None
-                
-            if "exam_tool" not in counter:
-                counter["exam_tool"] = {"main": 0, "backup": 0}
-            if "dictation_tool" not in counter:
-                counter["dictation_tool"] = {"main": 0, "backup": 0}
-                
-            if counter.get("last_reset_date") != today_str:
-                counter["last_reset_date"] = today_str
-                counter["exam_tool"] = {"main": 0, "backup": 0}
-                counter["dictation_tool"] = {"main": 0, "backup": 0}
-                
-            counter["dictation_tool"][counter_type] += 1
-            
-            content_str = json.dumps(counter, indent=2)
-            content_b64 = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
-            payload = {
-                "message": f"Increment dictation {counter_type} counter [skip ci]",
-                "content": content_b64
-            }
-            if sha:
-                payload["sha"] = sha
-                
-            put_res = requests.put(url, headers=headers, json=payload)
-            if put_res.status_code in [200, 201]:
-                st.toast(f"📊 默書雲端配額同步成功！今日已用「{counter_type}」：{counter['dictation_tool'][counter_type]} 次", icon="📝")
-                break
-            time.sleep(0.5)
-        except Exception as e:
-            st.toast(f"⚠️ 雲端計數器同步失敗: {str(e)}", icon="❌")
-            time.sleep(0.5)
 
 # ==========================================================
 # 🧠 雙語核心功能函數
@@ -201,7 +135,6 @@ def convert_image_to_base64(uploaded_file):
 def list_valid_free_models():
     """向 Google 實時查詢當前密鑰下支援 Vision 且真正可用的免費模型鏈條"""
     url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_TOKEN}"
-    # 精選目前已知、真正有免費額度的核心高可用主力模型，作爲基準順序
     priority_order = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"]
     
     try:
@@ -211,19 +144,15 @@ def list_valid_free_models():
             valid_models = []
             for m in all_models:
                 m_name = m.get("name", "").replace("models/", "")
-                # 篩選條件：必須是免費版（不帶 tuned），且支援圖片內容生成
                 if "generateContent" in m.get("supportedGenerationMethods", []) and "tunedModels" not in m_name:
                     valid_models.append(m_name)
             
-            # 依照優先權順序排列，把好用又快的 Flash 放前面，其餘新釋放的免費模型排後面
             sorted_models = [m for m in priority_order if m in valid_models]
             sorted_models += [m for m in valid_models if m not in sorted_models]
-            
-            # 如果偵測到最新的 gemini-3 系列，自動追加到隊伍中
             return sorted_models if sorted_models else priority_order
     except:
         pass
-    return priority_order # 萬一獲取清單網路超時，使用黃金備用鏈進行保底
+    return priority_order
 
 def gemini_vision_extract_bilingual(base64_images_list, mode="中文"):
     if not base64_images_list: return ""
@@ -248,35 +177,25 @@ def gemini_vision_extract_bilingual(base64_images_list, mode="中文"):
         parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
     payload = {"contents": [{"parts": parts}]}
     
-    # 🌟 1. 向 API 實時索取最新的免費高可用模型清單
     dynamic_free_models = list_valid_free_models()
     
-    # 🌟 2. 逐隻模型進行智能重試流控穿透
     for model_id in dynamic_free_models:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={GEMINI_TOKEN}"
         
-        # 每個 Model 享有 3 次指數退避重試機會，專治 429 頻率超限與暫時性網絡抖動
         for retry_idx in range(3):
             try:
-                # 縮短超時時間至合理的 25 秒，配合重試，防止單點卡死
                 res = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=25)
                 
-                # 遇到 429 (Quota 頻率撞牆) 或 5xx 伺服器忙碌，觸發智能延時重試
                 if res.status_code in [429, 500, 503]:
                     sleep_time = (retry_idx + 1) * 2  # 2秒 ➡️ 4秒 ➡️ 6秒
                     time.sleep(sleep_time)
                     continue
                     
                 if res.status_code == 200:
-                    # 🎉 識別成功：根據當前勝出的模型名稱動態匹配計數器
-                    c_type = "main" if "flash" in model_id else "backup"
-                    increment_github_counter(c_type)
                     return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
                     
-                # 如果是其他錯誤代碼（如 400 密鑰錯），說明該模型今日配額真的徹底用盡，不用重試，直接換下一隻
                 break
             except (requests.exceptions.Timeout, requests.exceptions.RequestException):
-                # 遇到連線超時，等 1.5 秒後進行下一次重試
                 time.sleep(1.5)
                 continue
                 
