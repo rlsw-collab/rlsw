@@ -29,7 +29,7 @@ def get_hkt_time():
     return datetime.datetime.now(tz_hkt)
 
 def fetch_github_counter():
-    """從 GitHub 讀取今日計數器，若跨日自動歸零"""
+    """從 GitHub 讀取今日計數器，若跨日自動歸零 (全新扁平化架構)"""
     path = "usage_counter.json"
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
     headers = {
@@ -39,9 +39,7 @@ def fetch_github_counter():
     
     today_str = get_hkt_time().strftime("%Y-%m-%d")
     default_counter = {
-        "last_reset_date": today_str,
-        "exam_tool": {"main": 0, "backup": 0},
-        "dictation_tool": {"main": 0, "backup": 0}
+        "last_reset_date": today_str
     }
     
     try:
@@ -50,185 +48,85 @@ def fetch_github_counter():
             data = res.json()
             content = base64.b64decode(data["content"]).decode("utf-8")
             counter = json.loads(content)
-            sha = data["sha"]
-        else:
-            counter = default_counter
-            sha = None
-    except:
-        counter = default_counter
-        sha = None
-        
-    # 🌟 00:00 - 23:59 跨日自動重置邏輯
-    if counter.get("last_reset_date") != today_str:
-        counter["last_reset_date"] = today_str
-        counter["exam_tool"] = {"main": 0, "backup": 0}
-        counter["dictation_tool"] = {"main": 0, "backup": 0}
-        update_github_counter(counter, sha)
-        
-    return counter
-
-def update_github_counter(counter, sha=None):
-    path = "usage_counter.json"
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    
-    if not sha:
-        try:
-            res = requests.get(url, headers=headers)
-            if res.status_code == 200:
-                sha = res.json()["sha"]
-        except:
-            pass
             
-    content_str = json.dumps(counter, indent=2)
-    content_b64 = base64.b64encode(content_str.encode("utf-8")).decode("utf-8")
-    
-    payload = {
-        "message": "Auto-reset usage counter [skip ci]",
-        "content": content_b64
-    }
-    if sha:
-        payload["sha"] = sha
-        
-    try:
-        res = requests.put(url, headers=headers, json=payload)
-        return res.status_code in [200, 201]
-    except:
-        return False
+            # 跨日檢查：如果 JSON 紀錄的日期不是今天，全盤重置歸零
+            if counter.get("last_reset_date") != today_str:
+                return default_counter
+            return counter
+        else:
+            return default_counter
+    except Exception:
+        return default_counter
 
-# 同步讀取雲端計數器
-with st.spinner("正在同步 GitHub 雲端配額..."):
-    counter = fetch_github_counter()
+# 載入當前即時配額數據
+counter = fetch_github_counter()
 
 # ==========================================
-# 2. 主標題與提示文字 (原有設計)
+# 2. 標題與橫幅
 # ==========================================
-st.markdown("<h1 style='text-align: center; color: #4A90E2;'>🎒 AI 智能教學工具箱</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: #666; font-size: 18px;'>歡迎使用！請選擇您今天需要使用的教學輔助工具：</p>", unsafe_allow_html=True)
-
-# 顯示即時香港時間監控提示
-now_hkt = get_hkt_time()
-st.markdown(f"<p style='text-align: center; color: #4A90E2; font-size: 14px; font-weight: bold; margin-bottom: 5px;'>📊 雲端配額監控：{now_hkt.strftime('%Y-%m-%d %H:%M:%S')} (計數週期 00:00 至 23:59)</p>", unsafe_allow_html=True)
-
-st.markdown("<p style='text-align: center; color: #999; font-size: 14px; font-style: italic;'>💡 提示：點擊下方大按鈕即可進入工具，您亦可以隨時使用左側選單快速切換。</p>", unsafe_allow_html=True)
-st.write("#")
+st.title(APP_TITLE)
+st.markdown(f"歡迎使用 AI 智能教學工具箱！本系統為香港中小學教師量身打造。當前伺服器時間 (香港)：`{get_hkt_time().strftime('%Y-%m-%d %H:%M:%S')}`")
 
 # ==========================================
-# 3. 🎨 原有卡片 CSS 樣式表
+# 3. 功能導航大卡片 (精緻 CSS 樣式)
 # ==========================================
-st.markdown("""
-<style>
-    .my-card-container {
-        display: flex;
-        gap: 25px;
-        justify-content: center;
-        flex-wrap: wrap;
-        margin-top: 10px;
-    }
-    .my-card {
-        background-color: #f8f9fa;
-        border: 2px solid #e9ecef;
-        border-radius: 15px;
-        padding: 30px 20px;
-        width: 260px;
-        min-height: 250px;
-        text-align: center;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        text-decoration: none !important;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.3s ease;
-    }
-    .my-card:hover {
-        transform: translateY(-6px);
-        box-shadow: 0 12px 20px rgba(0,0,0,0.1);
-        border-color: #ff4b4b;
-        background-color: #ffffff;
-    }
-    .my-card-emoji {
-        font-size: 64px;
-        margin-bottom: 15px;
-        line-height: 1.2;
-    }
-    .my-card-title {
-        font-size: 22px;
-        font-weight: bold;
-        color: #212529;
-        margin-bottom: 10px;
-        transition: color 0.3s ease;
-    }
-    .my-card:hover .my-card-title {
-        color: #ff4b4b;
-    }
-    .my-card-desc {
-        font-size: 14px;
-        color: #6c757d;
-        line-height: 1.5;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# 渲染原有大卡片 (拼接 HTML)
+st.write("---")
 cards_html = (
-    '<div class="my-card-container">'
-    '<a href="/%E9%BB%98%E6%9B%B8%E5%B7%A5%E5%85%B7" target="_self" class="my-card">'
-    '<span class="my-card-emoji">📝</span>'
-    '<span class="my-card-title">默書工具</span>'
-    '<span class="my-card-desc">智能語音讀默、自動對手寫稿，輕鬆處理學生日常默書。</span>'
-    '</a>'
-    '<a href="/%E8%80%83%E8%A9%A6%E5%8D%B7%E7%94%9F%E6%88%90%E5%99%A8" target="_self" class="my-card">'
-    '<span class="my-card-emoji">📚</span>'
-    '<span class="my-card-title">試卷生成器</span>'
-    '<span class="my-card-desc">上傳範圍與工作紙，AI 自動生成香港小學風格試卷。</span>'
-    '</a>'
+    '<div style="display: block; margin-bottom: 20px;">'
+    '  <a href="/默書工具" target="_self" style="text-decoration: none; display: block; background-color: #E0F2FE; border: 1px solid #7DD3FC; border-radius: 12px; padding: 20px; margin-bottom: 15px; transition: transform 0.2s; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">'
+    '    <h3 style="margin: 0 0 8px 0; color: #0369A1; font-size: 18px;">📝 智能默書語音生成與批改工具</h3>'
+    '    <span style="color: #0c4a6e; font-size: 14px;">上傳默書範圍課文圖片或直接輸入文本，一鍵自動分句、校對、導出多語音雙語(中/英)小學標準朗讀音頻及課堂配套。</span>'
+    '  </a>'
+    '  <a href="/考試卷生成器" target="_self" style="text-decoration: none; display: block; background-color: #F0FDF4; border: 1px solid #BBF7D0; border-radius: 12px; padding: 20px; transition: transform 0.2s; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">'
+    '    <h3 style="margin: 0 0 8px 0; color: #15803D; font-size: 18px;">📚 香港小學測驗/考試卷生成器</h3>'
+    '    <span style="color: #14532d; font-size: 14px;">根據教育局指引與香港小學主流教材，智能生成包含閱讀理解、語文基礎、平面幾何等完全符合專業排版的小學風格試卷。</span>'
+    '  </a>'
     '</div>'
 )
 st.markdown(cards_html, unsafe_allow_html=True)
 
 # ==========================================
-# 4. 📊 實時計數器與進度條區塊 (精緻緊湊排版)
+# 4. 📊 實時計數器與進度條區塊 (全新動態自動感應排版)
 # ==========================================
 st.write("##")
-MAIN_LIMIT = 20
-BACKUP_LIMIT = 40
+st.markdown("""
+<div style='text-align: center; font-weight: bold; font-size: 18px; margin-bottom: 15px; color: #1E3A8A;'>
+    📊 各 AI 模型今日調用次數統計 (香港時間)
+</div>
+""", unsafe_allow_html=True)
 
-# 建立左右兩欄，完美對齊上方的大卡片
-col_count1, col_count2 = st.columns(2)
+# 預設各模型的每日上限控制（可在此自由擴充）
+MODEL_LIMITS = {
+    "gemini-2.5-flash": 30,
+    "gemini-2.5-pro": 15,
+    "gpt-4o": 20
+}
+DEFAULT_LIMIT = 25
 
-with col_count1:
-    st.markdown("""
-    <div style='text-align: center; font-weight: bold; font-size: 15px; margin-bottom: 8px; color: #212529;'>
-        📝 默書工具今日已用通道
-    </div>
-    """, unsafe_allow_html=True)
-    d_main = counter["dictation_tool"]["main"]
-    d_backup = counter["dictation_tool"]["backup"]
-    
-    st.caption(f"🎯 主攻通道 (Flash): {d_main} / {MAIN_LIMIT}")
-    st.progress(min(d_main / MAIN_LIMIT, 1.0))
-    st.caption(f"🔄 後備通道 (Pro/v3): {d_backup} / {BACKUP_LIMIT}")
-    st.progress(min(d_backup / BACKUP_LIMIT, 1.0))
+# 過濾掉日期欄位，只留下真實模型數據
+model_counts = {k: v for k, v in counter.items() if k != "last_reset_date"}
 
-with col_count2:
-    st.markdown("""
-    <div style='text-align: center; font-weight: bold; font-size: 15px; margin-bottom: 8px; color: #212529;'>
-        📚 試卷生成今日已用通道
-    </div>
-    """, unsafe_allow_html=True)
-    e_main = counter["exam_tool"]["main"]
-    e_backup = counter["exam_tool"]["backup"]
-    
-    st.caption(f"🎯 主攻通道 (Flash): {e_main} / {MAIN_LIMIT}")
-    st.progress(min(e_main / MAIN_LIMIT, 1.0))
-    st.caption(f"🔄 後備通道 (Pro/v3): {e_backup} / {BACKUP_LIMIT}")
-    st.progress(min(e_backup / BACKUP_LIMIT, 1.0))
+if not model_counts:
+    st.info("💡 今日暫時未有 AI 模型調用記錄。開始使用工具後將在此實時顯示。")
+else:
+    # 採用雙欄排版展示各模型進度
+    cols = st.columns(2)
+    for idx, (model_name, count) in enumerate(model_counts.items()):
+        col = cols[idx % 2]
+        with col:
+            limit = MODEL_LIMITS.get(model_name, DEFAULT_LIMIT)
+            progress_val = min(count / limit, 1.0) if limit > 0 else 0.0
+            
+            # 模型精美動態卡片
+            st.markdown(f"""
+            <div style='background-color: #F8FAFC; padding: 10px; border-radius: 8px; border-left: 4px solid #3B82F6; margin-bottom: 5px; margin-top: 10px;'>
+                <span style='font-weight: bold; color: #1E293B;'>🤖 {model_name}</span>
+            </div>
+            """, unsafe_allow_html=True)
+            st.caption(f"今日已調用: {count} / {limit} 次")
+            st.progress(progress_val)
 
-# 底部刷新按鈕
+# 底部全局手動刷新按鈕
 st.write("##")
 if st.button("🔄 重新整理 / 同步雲端配額數據", use_container_width=True):
     st.rerun()
