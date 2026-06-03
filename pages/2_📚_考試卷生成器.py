@@ -37,7 +37,6 @@ if not st.session_state['authenticated']:
 # ==========================================
 st.title(APP_TITLE)
 
-# 注入母網頁的 @media print 打印控制及極致數學分數與幾何繪圖樣式調校
 st.markdown("""
     <style>
         @media print {
@@ -49,7 +48,6 @@ st.markdown("""
             h1, h2, h3, h4 { color: #000 !important; page-break-after: avoid; }
             .exam-container { border: none !important; padding: 0 !important; box-shadow: none !important; }
         }
-        /* 線上精美模擬考卷容器包裝 */
         .exam-container {
             background-color: #ffffff;
             padding: 40px 50px;
@@ -60,13 +58,9 @@ st.markdown("""
             line-height: 1.8;
             color: #000000;
         }
-        
-        /* 數學標準直式分數 CSS 渲染架構 */
         .v-frac { display: inline-table; vertical-align: middle; text-align: center; line-height: 1.0; padding: 0 4px; font-size: 0.85em; }
         .v-frac .num { border-bottom: 1.5px solid #000; padding-bottom: 2px; min-width: 14px; }
         .v-frac .den { padding-top: 2px; min-width: 14px; }
-        
-        /* 選擇題每行獨立包裹與對齊 */
         .mc-option { 
             margin-left: 20px; 
             margin-top: 6px; 
@@ -76,11 +70,8 @@ st.markdown("""
         }
         .mc-circle { font-size: 16px; font-weight: normal; margin-right: 4px; font-family: sans-serif; }
         .mc-ans { color: #ff4b4b; font-weight: bold; margin-right: 4px; font-family: sans-serif; }
-        
-        /* 答題紙橫線區域 */
         .write-zone { margin-top: 15px; margin-bottom: 30px; width: 100%; }
         .row-line { width: 100%; height: 38px; border-bottom: 1px dashed #999 !important; }
-        
         .page-break { page-break-before: always; }
     </style>
 """, unsafe_allow_html=True)
@@ -115,7 +106,6 @@ def increment_github_counter_for_exam(model_id="gpt-4o"):
                 counter = {"last_reset_date": today_str}
                 sha = None
                 
-            # 跨日自動全盤重置歸零
             if counter.get("last_reset_date") != today_str:
                 counter = {"last_reset_date": today_str}
                 
@@ -142,20 +132,12 @@ def increment_github_counter_for_exam(model_id="gpt-4o"):
             time.sleep(0.5)
 
 # ==========================================
-# 🛠️ 輔助渲染工具：動態幾何圖形生成與直式分數轉換
+# 🛠️ 輔助渲染工具：幾何圖形生成與直式分數轉換
 # ==========================================
 def inject_dynamic_geometry_and_fractions(html_content, slider_vals):
-    """
-    動態核心解析器：
-    1. 將 [SLIDER_X] 標籤動態替換為老師在 Streamlit 滑桿上設定的真實數字。
-    2. 將 [FRAC: 3/5] 或 3/5 動態渲染為符合香港考試標準的漂亮直式分數 HTML。
-    3. 當檢測到特定圖形關鍵字，自動嵌入高品質、精準尺寸的向量圖形 (SVG)。
-    """
-    # Step A: 替換滑桿動態參數值
     for i, val in enumerate(slider_vals):
         html_content = html_content.replace(f"[SLIDER_{i+1}]", str(val))
         
-    # Step B: 正規表示式高精度替換直式分數格式 [FRAC: A/B]
     frac_pattern = r'\[FRAC:\s*([0-9\-\+\*a-zA-Z]+)\s*/\s*([0-9\-\+\*a-zA-Z]+)\]'
     def frac_repl(match):
         num = match.group(1)
@@ -163,9 +145,7 @@ def inject_dynamic_geometry_and_fractions(html_content, slider_vals):
         return f'<table class="v-frac"><tr><td class="num">{num}</td></tr><tr><td class="den">{den}</td></tr></table>'
     html_content = re.sub(frac_pattern, frac_repl, html_content)
     
-    # Step C: 自動化幾何圖形 SVG 動態嵌入機制
     if "平面幾何" in html_content or "面積" in html_content or "圓" in html_content or "三角形" in html_content:
-        # 1. 如果提及「圓」，自動在題幹下方插入標準圓形 SVG
         if "圓" in html_content and "</svg>" not in html_content:
             r_val = slider_vals[0] if len(slider_vals) > 0 else 7
             circle_svg = f"""
@@ -181,7 +161,6 @@ def inject_dynamic_geometry_and_fractions(html_content, slider_vals):
             """
             html_content = html_content.replace("</div>\n<div class='mc-option'", f"{circle_svg}</div>\n<div class='mc-option'")
             
-        # 2. 如果提及「三角形」，自動插入直角/標準三角形 SVG
         if ("三角形" in html_content or "面積" in html_content) and "圓" not in html_content and "</svg>" not in html_content:
             b_val = slider_vals[0] if len(slider_vals) > 0 else 10
             h_val = slider_vals[1] if len(slider_vals) > 1 else 15
@@ -203,7 +182,6 @@ def inject_dynamic_geometry_and_fractions(html_content, slider_vals):
 # 🤖 試卷生成核心 API 呼叫區 (Azure GPT-4o 端)
 # ==========================================
 def generate_exam_paper_api(prompt_payload):
-    """經由 Azure AI 閘道安全調用企業級 GPT-4o 模型，並回傳格式化試卷"""
     AI_TOKEN = st.secrets["AI_TOKEN"] if "AI_TOKEN" in st.secrets else ""
     if not AI_TOKEN:
         st.error("❌ 未能在 Secrets 中配置完整的 AI_TOKEN，無法發起 AI 請求。")
@@ -243,7 +221,6 @@ def generate_exam_paper_api(prompt_payload):
     try:
         res = requests.post(url, headers=headers, json=payload, timeout=60)
         if res.status_code == 200:
-            # 🎉 試卷成功生成：觸發全新計數器，精準將「gpt-4o」計數 +1
             increment_github_counter_for_exam("gpt-4o")
             return res.json()["choices"][0]["message"]["content"].strip()
         else:
@@ -264,9 +241,7 @@ with st.sidebar:
     
     st.write("---")
     st.subheader("📐 幾何與數字動態調控滑桿")
-    st.caption("以下滑桿數值會即時精準注入題目中的 `[SLIDER_X]` 標籤，並同步驅動底層自動 SVG 幾何圖形繪製引擎！")
     
-    # 限制滑桿值只能是 0, 5, 10, 15, 20, 25, 30
     s1 = st.select_slider("動態參數 1 (如半徑/底/填充數)：", options=[0, 5, 10, 15, 20, 25, 30], value=10)
     s2 = st.select_slider("動態參數 2 (如高/次數/核心值)：", options=[0, 5, 10, 15, 20, 25, 30], value=15)
     s3 = st.select_slider("動態參數 3 (額外輔助參數)：", options=[0, 5, 10, 15, 20, 25, 30], value=5)
@@ -277,7 +252,6 @@ with st.sidebar:
     question_count = st.slider("4. 題目數量設定：", min_value=2, max_value=12, value=4, step=1)
     
     st.write("---")
-    st.caption("💡 設定完成後，點擊下方按鈕即可調用雲端高速智能引擎生成正式考卷。")
     submit_btn = st.button("🚀 開始動態生成專業試卷", use_container_width=True)
 
 # ==========================================
@@ -289,24 +263,15 @@ if 'current_paper' not in st.session_state:
 if submit_btn:
     user_prompt = f"請為{grade}的{subject}生成一份主題為「{topic}」的專業測驗卷。總題目數量要求為 {question_count} 題。請確保完美嵌入 [SLIDER_1]、[SLIDER_2] 等幾何控制標籤，並使用香港本地考卷標準格式。"
     
-    with st.spinner("🔮 AI 專家出題系統正在高速編排題目、校對標準答案、轉換動態幾何圖形..."):
+    with st.spinner("🔮 AI 專家出題系統正在高速編排題目..."):
         raw_html = generate_exam_paper_api(user_prompt)
         if raw_html:
             st.session_state['current_paper'] = raw_html
             st.success("🎉 試卷動態生成成功！您可以在下方查看、動態調整參數，或直接進行列印。")
 
-# 展示與動態渲染區
 if st.session_state['current_paper']:
     st.markdown("### 📄 考卷動態實時預覽 (A4 標準排版)")
-    
-    # 調用動態核心渲染引擎，將最新滑桿參數與 SVG 幾何圖形實時注入
     final_rendered_html = inject_dynamic_geometry_and_fractions(st.session_state['current_paper'], slider_vals)
-    
-    # 輸出至 Streamlit 畫面
     st.markdown(f"<div class='exam-container'>{final_rendered_html}</div>", unsafe_allow_html=True)
-    
-    st.write("##")
-    # 提供老師直接打印或另存為 PDF 的網頁打印呼叫
-    st.button("🖨️ 點擊啟動系統列印 / 另存為 PDF 檔案", on_click=lambda: st.js_code("window.print();"), use_container_width=True)
 else:
     st.info("👈 請先在左側控制面板中配置您的年級與主題，然後點擊「開始動態生成專業試卷」按鈕。")
