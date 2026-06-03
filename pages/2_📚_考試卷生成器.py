@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.10.0：終極強固！雙向鎖定 master 分支，強制重刷快取機制，全面防禦儲存無效與同步斷層
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.0"
+# 🆕 升級 v1.10.1：終極修復！修正主分支為 main，徹底解決 404 Branch not found 儲存失敗問題
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.1"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -93,12 +93,12 @@ def read_from_exam_vault():
     path = get_exam_vault_path()
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
-# 🛠️ GitHub 雲端知識庫 CRUD 雙向強固函數組
+# 🛠️ GitHub 雲端知識庫 CRUD 雙向強固函數組 (已更正為 main 分支)
 def upload_knowledge_base_to_github(name, b64_images):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', name)
     path = f"knowledge_base/{safe_name}.json"
-    # 🔒 強制鎖定 master 分支進行查詢與寫入
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref=master"
+    # 🔒 修正：強制鎖定 main 分支進行查詢與寫入
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref=main"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json"
@@ -125,13 +125,13 @@ def upload_knowledge_base_to_github(name, b64_images):
     put_payload = {
         "message": f"Save knowledge base: {name} [skip ci]",
         "content": content_b64,
-        "branch": "master" # 🔒 明確指示寫入 master 分支
+        "branch": "main" # 🔒 修正：明確指示寫入 main 分支
     }
     if sha:
         put_payload["sha"] = sha
         
     write_url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
-    add_log(f"🚀 正在推送最新數據至 GitHub...")
+    add_log(f"🚀 正在推送最新數據至 GitHub (main 分支)...")
     put_res = requests.put(write_url, headers=headers, json=put_payload)
     
     add_log(f"🔔 GitHub 儲存回應狀態碼: {put_res.status_code}")
@@ -143,7 +143,7 @@ def upload_knowledge_base_to_github(name, b64_images):
 def delete_knowledge_base_from_github(name):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', name)
     path = f"knowledge_base/{safe_name}.json"
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref=master"
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref=main"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json"
@@ -154,14 +154,14 @@ def delete_knowledge_base_from_github(name):
         delete_payload = {
             "message": f"Delete knowledge base: {name} [skip ci]",
             "sha": sha,
-            "branch": "master"
+            "branch": "main"
         }
         del_res = requests.delete(f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}", headers=headers, json=delete_payload)
         return del_res.status_code == 200
     return False
 
 def list_knowledge_bases_from_github():
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/knowledge_base?ref=master"
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/knowledge_base?ref=main"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
         "Accept": "application/vnd.github.v3+json"
@@ -176,7 +176,8 @@ def list_knowledge_bases_from_github():
 
 def get_knowledge_base_content(kb_name):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', kb_name)
-    raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/master/knowledge_base/{safe_name}.json"
+    # 🚀 修正：改走 main 分支的 Raw 通道
+    raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/knowledge_base/{safe_name}.json"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}"
     }
@@ -514,7 +515,7 @@ with tab_exam:
             geo_rule = ""
             if has_geometry:
                 geo_rule = f"""
-                ⚠️【核心幾何命令】：考量到本次範圍涉及幾何，你必須在題目中穿插嵌入幾何圖形標記。
+                ⚠️【核心幾何命令】：考量到本次範圍涉及幾何，你必須在題目中穿跨嵌入幾何圖形標記。
                 - [GEOMETRIC:three_circles_linear:r1=大圓半徑;r2=中圓半徑;r3=小圓半徑]
                 - [GEOMETRIC:circles_in_rectangle:w=長方形長;h=長方形闊]
                 - [GEOMETRIC:concentric_overlap:d1=大圓直徑]
@@ -535,7 +536,7 @@ with tab_exam:
             task_step = 1.0 / len(tasks) if tasks else 1.0
             
             for idx, (t_title, t_num) in enumerate(tasks):
-                sub_prompt = f"""你是一位香港名校【{subject}科】主任。請為【香港小學{grade}】編寫【{subject}科】測驗卷的【{t_title}】。
+                sub_prompt = f"""你是一位香港名校【{subject}科】主任。請為【香港小學{grade}】編寫【{subject}科}】測驗卷的【{t_title}】。
                 本次出題範圍與已提煉的知識庫考點為：「{final_vault_text}」
                 要求寫出全部 {t_num} 題，不准使用省略號。
                 {geo_rule}
@@ -551,7 +552,7 @@ with tab_exam:
             st.rerun()
 
 # ------------------------------------------
-# TAB 2: 雲端多圖知識庫管理 (雙向強固版)
+# TAB 2: 雲端多圖知識庫管理 (相容 main 分支終極版)
 # ------------------------------------------
 with tab_kb:
     st.header("📂 雲端課文/作業/工作紙知識庫管理")
@@ -657,7 +658,6 @@ with tab_kb:
                     success = upload_knowledge_base_to_github(current_kb_name.strip(), total_images)
                     if success:
                         st.success(f"🎉 雲端知識庫「{current_kb_name}」已成功保存並更新！正在清理本機快取...")
-                        # 🌟 儲存成功後強制洗乾淨本機快取暫存，迫使下一輪讀取雲端最新的完整大檔案
                         st.session_state['kb_current_b64_list'] = []
                         st.session_state['new_uploaded_cache'] = []
                         st.session_state['last_loaded_kb'] = ""
