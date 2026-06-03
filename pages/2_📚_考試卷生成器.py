@@ -11,8 +11,8 @@ import datetime
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.8.0：新增中英文雙語出題切換功能，優化數學及常識科本地化需求
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.8.0"
+# 🆕 升級 v1.8.1：調整科目與年級下拉選單的排列順序，符合傳統習慣
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.8.1"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -321,7 +321,6 @@ def python_layout_engine(raw_text, is_answer_key=False):
         # 6. 自動為填充題的子題目結尾補上答題線
         is_fill_section = any(s in current_section for s in ["第二", "填充", "填空", "FILL", "Fill", "Blanks"])
         if is_fill_section and not is_answer_key:
-            # 匹配以括號中文、英文、羅馬字母或數字開頭的行，例如 (一)、(1)、(a)、(i)
             if re.match(r'^[\(（][一二三四五六七八九十\da-zA-Z]+[\)）]', clean_line):
                 if '<span class="fill-blank-underline">' not in line:
                     line = f'{line} <span class="fill-blank-underline"></span>'
@@ -348,8 +347,8 @@ current_vault_ocr = read_from_exam_vault()
 
 st.header("📋 步驟一：基本資料與功能設定")
 col_meta1, col_meta2, col_meta3 = st.columns(3)
-with col_meta1: subject = st.selectbox("選擇科目", ["數學", "中文", "英文", "常識"])
-with col_meta2: grade = st.selectbox("選擇年級", ["小五", "小六", "小四", "小三", "小二", "小一"])
+with col_meta1: subject = st.selectbox("選擇科目", ["中文", "英文", "數學", "常識"])
+with col_meta2: grade = st.selectbox("選擇年級", ["小一", "小二", "小三", "小四", "小五", "小六"])
 with col_meta3: language = st.selectbox("語言模式 / Language", ["繁體中文", "English"])
 
 st.write("##")
@@ -423,7 +422,7 @@ if btn_call_ai:
             if text_count > 0: tasks.append((f"Part IV: Long/Word Questions (Total {text_count} questions, from Q{mc_count+fill_count+calc_count+1} to Q{mc_count+fill_count+calc_count+text_count})", text_count))
             
             grade_map = {"小一":"Primary 1", "小二":"Primary 2", "小三":"Primary 3", "小四":"Primary 4", "小五":"Primary 5", "小六":"Primary 6"}
-            subject_map = {"數學":"Mathematics", "中文":"Chinese", "英文":"English", "常識":"General Studies"}
+            subject_map = {"中文":"Chinese", "英文":"English", "數學":"Mathematics", "常識":"General Studies"}
             en_grade = grade_map.get(grade, grade)
             en_subject = subject_map.get(subject, subject)
             
@@ -442,7 +441,7 @@ if btn_call_ai:
                 
                 要求：
                 1. 必須完整地生成全部 {t_num} 道題目，每一題都要寫出具體文字。
-                2. ❌ 絕對不允許使用任何 '...' 省略號，亦不准寫出簡寫字。
+                2. ❌ 絕對不允許使用 any '...' 省略號，亦不准寫出簡寫字。
                 3. 繁體中文香港小學標準。
                 {geo_rule}
                 
@@ -454,7 +453,7 @@ if btn_call_ai:
                 """
             else:
                 grade_map = {"小一":"Primary 1", "小二":"Primary 2", "小三":"Primary 3", "小四":"Primary 4", "小五":"Primary 5", "小六":"Primary 6"}
-                subject_map = {"數學":"Mathematics", "中文":"Chinese", "英文":"English", "常識":"General Studies"}
+                subject_map = {"中文":"Chinese", "英文":"English", "數學":"Mathematics", "常識":"General Studies"}
                 en_grade = grade_map.get(grade, grade)
                 en_subject = subject_map.get(subject, subject)
                 
