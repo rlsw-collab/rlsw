@@ -5,7 +5,7 @@
     "backup": 25
   },
   "dictation_tool": {
-    "main": 1,
+    "main": 2,
     "backup": 0
   },
   "gemini-2.5-flash": 1
