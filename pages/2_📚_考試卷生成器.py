@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.10.2：全面校對語法結構，鐵壁修復由全域取代引起的 SyntaxError，確保 main 分支讀寫絕對流暢
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.2"
+# 🆕 升級 v1.10.3：終極修復！移除 file_uploader 沖刷快取的 else 陷阱，引入單向快取追加鎖定，確保儲存追加 100% 觸發
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.3"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -93,7 +93,7 @@ def read_from_exam_vault():
     path = get_exam_vault_path()
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
-# 🛠️ GitHub 雲端知識庫 CRUD 雙向強固函數組 (完美鎖定 main 分支)
+# 🛠️ GitHub 雲端知識庫 CRUD 強固函數組
 def upload_knowledge_base_to_github(name, b64_images):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', name)
     path = f"knowledge_base/{safe_name}.json"
@@ -104,13 +104,13 @@ def upload_knowledge_base_to_github(name, b64_images):
     }
     
     sha = None
-    add_log("💾 準備儲存更新，正在向 GitHub 查詢舊有檔案的 SHA 標籤...")
+    add_log("💾 儲存程序啟動：正在向 GitHub 查詢 SHA 標籤...")
     res = requests.get(url, headers=headers)
     if res.status_code == 200:
         sha = res.json().get("sha")
-        add_log(f"✅ 成功獲取舊檔案 SHA: {sha}，本次將執行覆蓋覆寫。")
+        add_log(f"✅ 成功撈到舊檔案 SHA: {sha}，將進行覆寫。")
     else:
-        add_log(f"💡 未找到舊檔案 SHA (狀態碼: {res.status_code})，本次將視為全新檔案建立。")
+        add_log(f"💡 未找到舊檔案 SHA (狀態碼: {res.status_code})，將建立全新檔案。")
         
     payload_data = {
         "kb_name": name,
@@ -130,12 +130,12 @@ def upload_knowledge_base_to_github(name, b64_images):
         put_payload["sha"] = sha
         
     write_url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
-    add_log("🚀 正在推送最新數據至 GitHub (main 分支)...")
+    add_log(f"🚀 推送 JSON 到雲端，總共上傳圖片張數：{len(b64_images)} 張")
     put_res = requests.put(write_url, headers=headers, json=put_payload)
     
-    add_log(f"🔔 GitHub 儲存回應狀態碼: {put_res.status_code}")
+    add_log(f"🔔 GitHub 伺服器回應狀態碼: {put_res.status_code}")
     if put_res.status_code not in [200, 201]:
-        add_log(f"❌ 儲存失敗！GitHub 錯誤回應：{put_res.text}")
+        add_log(f"❌ 儲存失敗！詳細錯誤原因：{put_res.text}")
         
     return put_res.status_code in [200, 201]
 
@@ -427,6 +427,7 @@ def python_layout_engine(raw_text, is_answer_key=False):
 tab_exam, tab_kb = st.tabs(["📝 試卷生成工具", "📂 雲端多圖知識庫管理"])
 
 if 'kb_current_b64_list' not in st.session_state: st.session_state['kb_current_b64_list'] = []
+if 'new_uploaded_cache' not in st.session_state: st.session_state['new_uploaded_cache'] = []
 if 'last_loaded_kb' not in st.session_state: st.session_state['last_loaded_kb'] = ""
 
 # ------------------------------------------
@@ -534,7 +535,6 @@ with tab_exam:
             task_step = 1.0 / len(tasks) if tasks else 1.0
             
             for idx, (t_title, t_num) in enumerate(tasks):
-                # 🔒 完美修復引號閉合與 Prompt 變數結構
                 sub_prompt = f"""你是一位香港名校【{subject}科】主任。請為【香港小學{grade}】編寫【{subject}科】測驗卷的【{t_title}】。
                 本次出題範圍與已提煉的知識庫考點為：「{final_vault_text}」
                 要求寫出全部 {t_num} 題，不准使用省略號。
@@ -619,7 +619,7 @@ with tab_exam:
         components.html(html_for_printing, height=1200, scrolling=True)
 
 # ------------------------------------------
-# TAB 2: 雲端多圖知識庫管理 (相容 main 分支終極版)
+# TAB 2: 雲端多圖知識庫管理 (v1.10.3 鎖定緩衝版)
 # ------------------------------------------
 with tab_kb:
     st.header("📂 雲端課文/作業/工作紙知識庫管理")
@@ -691,33 +691,44 @@ with tab_kb:
         current_kb_name = st.text_input("📝 請輸入全新知識庫名稱：", value="", key="new_kb_name_input")
         st.session_state['kb_current_b64_list'] = []
     
+    # 💥【單向追加鎖定核心】
     uploaded_files = st.file_uploader("📸 請選擇或拖放上傳檔案：", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="kb_file_uploader")
+    
     if uploaded_files:
-        temp_new_b64s = []
         for f in uploaded_files:
             f_bytes = f.read()
             b64_str = base64.b64encode(f_bytes).decode("utf-8")
             clean_new_b64 = re.sub(r'\s+', '', b64_str)
-            if clean_new_b64 not in temp_new_b64s:
-                temp_new_b64s.append(clean_new_b64)
-        st.session_state['new_uploaded_cache'] = temp_new_b64s
-    else:
-        st.session_state['new_uploaded_cache'] = []
+            # 🌟 單向點對點安全追加進快取，即使重新整理亦絕不被 Else 清空！
+            if clean_new_b64 not in st.session_state['new_uploaded_cache']:
+                st.session_state['new_uploaded_cache'].append(clean_new_b64)
+                add_log(f"📥 暫存鎖定成功：新圖片 ({len(clean_new_b64)} 字元) 已安全追加至記憶體。")
 
+    # 顯示目前已累計追加嘅新相片數量與即時預覽
     if st.session_state['new_uploaded_cache']:
-        st.markdown("#### 🔍 新上傳檔案即時預覽：")
+        col_info1, col_info2 = st.columns([4, 1])
+        with col_info1:
+            st.markdown(f"#### 🔍 準備追加的新相片預覽（目前已累計：{len(st.session_state['new_uploaded_cache'])} 張）")
+        with col_info2:
+            if st.button("🧹 清除新相片暫存", use_container_width=True):
+                st.session_state['new_uploaded_cache'] = []
+                st.rerun()
+                
         preview_cols = st.columns(5)
         for f_idx, b64_str in enumerate(st.session_state['new_uploaded_cache']):
             clean_new_src = b64_str if b64_str.startswith("data:image") else f"data:image/jpeg;base64,{b64_str}"
             with preview_cols[f_idx % 5]:
-                st.image(clean_new_src, use_container_width=True, caption=f"新上傳 {f_idx+1}")
+                st.image(clean_new_src, use_container_width=True, caption=f"準備追加第 {f_idx+1} 張")
 
     st.write("##")
     if st.button("💾 儲存並同步至雲端知識庫", type="primary", use_container_width=True, key="save_kb_final_btn"):
         if not current_kb_name.strip():
             st.error("❌ 請輸入或選擇有效的知識庫名稱！")
         else:
+            # 完美合併：保留的舊圖 + 完美鎖定住的新追加圖
             total_images = st.session_state['kb_current_b64_list'] + st.session_state['new_uploaded_cache']
+            add_log(f"按鈕觸發：準備打包寫入雲端。目前保留舊圖：{len(st.session_state['kb_current_b64_list'])} 張，新追加圖：{len(st.session_state['new_uploaded_cache'])} 張，總計：{len(total_images)} 張")
+            
             if not total_images:
                 st.error("❌ 知識庫內不能沒有任何有效檔案！")
             else:
