@@ -14,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.7.5：全圖形完美排版版 (全面支援三角形與體積 + 選擇題自動分行 + 答題線完美對齊 + iPad OS 列印)
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.7.5"
+# 🆕 升級 v1.7.6：修復 MC 所有人人有圓圈版 (確保 A B C D 前方均有 ○ 供考生填滿)
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.7.6"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -68,16 +68,16 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 安全金鑰設定與【實體檔案保險箱機制】
+# 1. 安全金鑰設定
 # ==========================================
 try:
     GITHUB_TOKEN = st.secrets["GIT_TOKEN"]
     GEMINI_TOKEN = st.secrets["GEMINI_TOKEN"]
-    AI_TOKEN = st.secrets.get("AI_TOKEN", "") # GitHub 免費 Models 綠色通道 Key
+    AI_TOKEN = st.secrets.get("AI_TOKEN", "")
     GITHUB_REPO = "rlsw"
     GITHUB_USER = "rlsw-collab"
 except Exception as e:
-    st.error("❌ 未能在 Streamlit Secrets 中找到基礎憑證 (GIT_TOKEN 或 GEMINI_TOKEN)。")
+    st.error("❌ 未能在 Streamlit Secrets 中找到基礎憑證。")
     st.stop()
 
 def get_exam_vault_path():
@@ -95,7 +95,7 @@ def read_from_exam_vault():
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================
-# 🛡️ GitHub 雲端實時計數同步邏輯 (防衝突 ＆ 安全自癒)
+# 🛡️ GitHub 計數同步
 # ==========================================
 def get_hkt_date_str():
     tz_hkt = datetime.timezone(datetime.timedelta(hours=8))
@@ -104,16 +104,9 @@ def get_hkt_date_str():
 def increment_github_counter(counter_type):
     path = "usage_counter.json"
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
-    }
+    headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     today_str = get_hkt_date_str()
-    default_counter = {
-        "last_reset_date": today_str,
-        "exam_tool": {"main": 0, "backup": 0},
-        "dictation_tool": {"main": 0, "backup": 0}
-    }
+    default_counter = {"last_reset_date": today_str, "exam_tool": {"main": 0, "backup": 0}, "dictation_tool": {"main": 0, "backup": 0}}
     for attempt in range(3):
         try:
             res = requests.get(url, headers=headers)
@@ -157,20 +150,14 @@ def ensure_flat_string(val):
         return "\n".join(lines)
     return str(val)
 
-# ==========================================
-# 🛡️ AI 題目生成通道 (GitHub GPT-4o 核心單獨調用)
-# ==========================================
 def call_pure_free_multiverse_ai(text_prompt):
     if AI_TOKEN:
         url = "https://models.inference.ai.azure.com/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {AI_TOKEN}",
-            "Content-Type": "application/json"
-        }
+        headers = {"Authorization": f"Bearer {AI_TOKEN}", "Content-Type": "application/json"}
         github_payload = {
             "model": "gpt-4o",
             "messages": [
-                {"role": "system", "content": "You are a professional JSON output assistant. You must return a strict JSON object with fields 'exam_body' and 'answer_body'. DO NOT OMIT ANY QUESTIONS. Write out every single item explicitly without using '...' ellipses."},
+                {"role": "system", "content": "You are a professional JSON output assistant. You must return a strict JSON object with fields 'exam_body' and 'answer_body'. DO NOT OMIT ANY QUESTIONS. Write out every single item explicitly."},
                 {"role": "user", "content": text_prompt}
             ],
             "response_format": {"type": "json_object"},
@@ -184,34 +171,13 @@ def call_pure_free_multiverse_ai(text_prompt):
                 raw_content = re.sub(r'\s*```$', '', raw_content).strip()
                 increment_github_counter("backup")
                 return json.loads(raw_content)
-        except Exception as e:
-            pass
+        except: pass
     return None
 
-def do_gemini_ocr_with_fallback(b64_list, gemini_token):
-    prompt = "你是一個100%精準的繁體中文與英文幾何工作紙打字掃描儀。請將圖片中的所有幾何圖形題目文字、數字、選項抄寫下來。直接輸出純文字，不要加入任何解釋。"
-    parts = [{"text": prompt}]
-    for b64 in b64_list: parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
-    payload = {"contents": [{"parts": parts}]}
-    models = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3-flash"]
-    for model_id in models:
-        api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={gemini_token}"
-        try:
-            res = requests.post(api_url, headers={"Content-Type": "application/json"}, json=payload, timeout=40)
-            if res.status_code == 200:
-                increment_github_counter("main")
-                return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-        except: continue
-    return "❌ 圖片辨識失敗，請稍候重試或手動輸入。"
-
 # ==========================================
-# 🎨 🛠️ 幾何圖形 SVG 印刷級動態渲染器 (含三角形與體積) 🛠️ 🎨
+# 🎨 幾何圖形 SVG 印刷級動態渲染器
 # ==========================================
 def draw_svg_geometry(marker_str):
-    """
-    解析語法：[GEOMETRIC:type:param1=val1;param2=val2]
-    並動態回傳黑白高對比、印刷級幾何向量圖
-    """
     try:
         marker_str = marker_str.replace("[", "").replace("]", "")
         parts = marker_str.split(":")
@@ -226,7 +192,6 @@ def draw_svg_geometry(marker_str):
                 
         svg_code = ""
         
-        # 題型一：三圓連心切點題 (模擬工作紙第3, 5題)
         if g_type == "three_circles_linear":
             r1 = params.get("r1", "10")
             r3 = params.get("r3", "7")
@@ -246,7 +211,6 @@ def draw_svg_geometry(marker_str):
             </div>
             """
             
-        # 題型二：長方形內切雙圓題 (模擬工作紙第2題)
         elif g_type == "circles_in_rectangle":
             w = params.get("w", "24")
             h = params.get("h", "12")
@@ -264,7 +228,6 @@ def draw_svg_geometry(marker_str):
             </div>
             """
             
-        # 題型三：大小圓重疊 / 半徑同心圓組合 (模擬工作紙第1, 4題)
         elif g_type == "concentric_overlap":
             d1 = params.get("d1", "16")
             svg_code = f"""
@@ -281,7 +244,6 @@ def draw_svg_geometry(marker_str):
             </div>
             """
             
-        # 🆕 題型四：三角形底與高題 (新增)
         elif g_type == "triangle":
             b = params.get("b", "15")
             h = params.get("h", "10")
@@ -297,7 +259,6 @@ def draw_svg_geometry(marker_str):
             </div>
             """
 
-        # 🆕 題型五：立體等角透視長方體/正方體體積題 (新增)
         elif g_type == "cuboid_volume":
             l = params.get("l", "12")
             w = params.get("w", "8")
@@ -305,17 +266,12 @@ def draw_svg_geometry(marker_str):
             svg_code = f"""
             <div class="geo-container" style="text-align:center; margin:15px 0;">
             <svg width="260" height="160" style="background:white; border:1px solid #ddd; border-radius:6px; display:inline-block;">
-                <!-- 長方體前表面 -->
                 <polygon points="40,120 160,120 160,60 40,60" stroke="black" stroke-width="1.8" fill="none" />
-                <!-- 長方體上表面 -->
                 <polygon points="40,60 160,60 210,30 90,30" stroke="black" stroke-width="1.5" fill="none" />
-                <!-- 長方體右側表面 -->
                 <polygon points="160,120 210,90 210,30 160,60" stroke="black" stroke-width="1.8" fill="none" />
-                <!-- 後方看不見的隱藏虛線 -->
                 <line x1="40" y1="120" x2="90" y2="90" stroke="black" stroke-width="1.2" stroke-dasharray="3" />
                 <line x1="90" y1="90" x2="210" y2="90" stroke="black" stroke-width="1.2" stroke-dasharray="3" />
                 <line x1="90" y1="90" x2="90" y2="30" stroke="black" stroke-dasharray="3" stroke-width="1.2" />
-                <!-- 長、闊、高參數標註 -->
                 <text x="80" y="138" font-size="12" font-weight="bold" font-family="sans-serif">長 = {l} cm</text>
                 <text x="185" y="110" font-size="12" font-weight="bold" font-family="sans-serif">闊 = {w} cm</text>
                 <text x="10" y="90" font-size="12" font-weight="bold" font-family="sans-serif">高 = {h} cm</text>
@@ -327,7 +283,7 @@ def draw_svg_geometry(marker_str):
         return "📐 [幾何圖形加載錯誤] 📐"
 
 # ==========================================
-# 🚀 雙引擎渲染核心 🚀
+# 🚀 雙引擎渲染核心 (v1.7.6 完美修正 MC 圓圈)
 # ==========================================
 def convert_to_vertical_fractions(text_content):
     text_content = re.sub(r'(\d+)\s*又\s*(\d+)\s*分之\s*(\d+)', r'\1<span class="v-frac"><span class="num">\3</span><span class="den">\2</span></span>', text_content)
@@ -340,8 +296,6 @@ def convert_to_vertical_fractions(text_content):
 def python_layout_engine(raw_text, is_answer_key=False):
     if not raw_text: return ""
     raw_text = raw_text.replace("\\n", "\n").replace("\\\\n", "\n")
-    
-    # 清洗可能存在的 markdown 加粗標籤，便於排版與正則捕獲
     raw_text = raw_text.replace("**", "").replace("###", "")
     lines = raw_text.split('\n')
     processed_lines = []
@@ -351,13 +305,11 @@ def python_layout_engine(raw_text, is_answer_key=False):
         if not line.strip(): continue
         clean_line = line.strip()
         
-        # 1. 識別大題目部別與主題 (確保狀態同步更新)
         if "部：" in clean_line or "部分：" in clean_line or "部" in clean_line or "部分" in clean_line:
             current_section = clean_line
             processed_lines.append(f'<div class="exam-section-header">{clean_line}</div>')
             continue
             
-        # 2. 識別試卷主副標題
         if "測驗" in clean_line or "考試" in clean_line or ("試卷" in clean_line and len(clean_line) < 35):
             processed_lines.append(f'<div class="exam-title-main">{clean_line}</div>')
             continue
@@ -365,7 +317,6 @@ def python_layout_engine(raw_text, is_answer_key=False):
             processed_lines.append(f'<div class="exam-user-info">{clean_line}</div>')
             continue
             
-        # 3. 幾何 SVG 標籤拦截與繪製
         geo_match = re.search(r'(\[GEOMETRIC:[^\]]+\])', line)
         if geo_match:
             full_marker = geo_match.group(1)
@@ -374,7 +325,8 @@ def python_layout_engine(raw_text, is_answer_key=False):
             processed_lines.append(f'<div>{line}</div>')
             continue
 
-        # 4. 🌟 多項選擇題（MC）智慧分流與橫跨分行（徹底拆分 A. B. C. D.）
+        # 🌟 核心修正：多項選擇題（MC）智慧分流與人人有圓圈引擎
+        # 本段正則可以精準捕捉包含任何 A. B. C. D. 或前面已有標記的選項組合
         options = re.findall(r'([○●]?\s*[A-D]\.\s*[^A-D○●\n\t]+)', line)
         first_opt_match = re.search(r'[○●]?\s*A\.', line)
         
@@ -382,34 +334,30 @@ def python_layout_engine(raw_text, is_answer_key=False):
             idx = first_opt_match.start()
             question_part = line[:idx].strip()
             
-            # 如果選項和題目合在同一行，先把題目放出來
             if question_part:
                 processed_lines.append(f'<div class="question-text">{question_part}</div>')
             
-            # 依序排列每一個選項至新行
+            # 依序渲染每個選項，保證每一個選項都有圓圈（○）
             for opt in options:
                 opt_str = opt.strip()
-                # 剔除並美化 AI 吐出的答案標註
-                if "●" in opt_str:
-                    opt_str = opt_str.replace("●", "").strip()
+                # 剔除舊標籤，統一格式化
+                opt_str = re.sub(r'^[○●]\s*', '', opt_str).strip()
+                
+                # 如果是答案頁且帶有特定答案標記（或者由 AI 標註）
+                if "●" in opt or is_answer_key:
                     processed_lines.append(f'<div class="mc-option"><span class="mc-ans">●</span> {opt_str}</div>')
                 else:
-                    opt_str = opt_str.replace("○", "").strip()
-                    processed_lines.append(f'<div class="mc-option">○ {opt_str}</div>')
+                    processed_lines.append(f'<div class="mc-option"><span class="mc-circle">○</span> {opt_str}</div>')
             continue
 
-        # 5. 底線與空括號長度 3 倍美化
         line = re.sub(r'([_＿]{2,})', r'<span class="fill-blank-underline"></span>', line)
         line = re.sub(r'([\(（])\s{2,}([\)）])', r'\1 <span class="fill-blank-underline"></span> \2', line)
         line = convert_to_vertical_fractions(line)
 
-        # 6. 🌟 智慧判斷是否該產生手寫答題紙 (列式與長題目)
         is_applied_or_calc_section = any(s in current_section for s in ["第三", "第四", "計算", "應用題", "文字題", "長題目"])
         
-        # 當前行是以數字加點（如 "31." "42."）開頭，且為非答案頁、在計算/長題目區中
         if re.match(r'^\d+\.', clean_line) and not is_answer_key and is_applied_or_calc_section:
             processed_lines.append(f'<div class="question-text">{line}</div>')
-            # 完美追加 4 行高質感虛線答題區
             processed_lines.append('<div class="write-zone">' + '<div class="row-line"></div>'*4 + '</div>')
             continue
 
@@ -432,7 +380,7 @@ with col_meta1: subject = st.selectbox("選擇科目", ["數學", "中文", "英
 with col_meta2: grade = st.selectbox("選擇年級", ["小五", "小六", "小四", "小三", "小二", "小一"])
 
 st.write("##")
-st.markdown("### 🔢 設定各題型生成數量 (只限 0, 5, 10, 15, 20, 25, 30)")
+st.markdown("### 🔢 設定各題型生成數量")
 col_s1, col_s2, col_s3, col_s4 = st.columns(4)
 with col_s1: mc_count = st.slider("多項選擇題", 0, 30, 5, step=5)
 with col_s2: fill_count = st.slider("填充題", 0, 30, 5, step=5)
@@ -462,8 +410,6 @@ if btn_call_ai:
         st.error("❌ 請至少選擇一種題型的數量大於 0！")
     else:
         final_vault_text = read_from_exam_vault()
-        
-        # 幾何高階自動化偵測 (圓、三角、面積、體積等關鍵字)
         has_geometry = any(kw in final_vault_text for kw in ["圓", "三角", "面積", "體積"])
         
         geo_rule = ""
@@ -478,7 +424,6 @@ if btn_call_ai:
             - [GEOMETRIC:cuboid_volume:l=12;w=8;h=5] (若涉及長方體/正方體體積計算)
             """
 
-        # 建立分批生成任務
         tasks = []
         if mc_count > 0: tasks.append(("MC", f"第一部分：多項選擇題（共 {mc_count} 題，題號由 1 開始到 {mc_count}）", mc_count))
         if fill_count > 0: tasks.append(("FILL", f"第二部分：填充題（共 {fill_count} 題，題號由 {mc_count+1} 開始到 {mc_count+fill_count}）", fill_count))
@@ -498,7 +443,7 @@ if btn_call_ai:
             
             要求：
             1. 必須完整地生成全部 {t_num} 道題目，每一題都要寫出具體文字。
-            2. ❌ 絕對不允許使用任何 '...' 省略號，亦不准寫出『(共15題)』等偷懶字眼！
+            2. ❌ 絕對不允許使用任何 '...' 省略號，亦不准寫出簡寫字。
             3. 繁體中文香港小學標準。
             {geo_rule}
             
@@ -524,7 +469,7 @@ if btn_call_ai:
         st.session_state['generated_answers'] = combined_ans
         st.session_state['exam_text_editor'] = combined_exam
         st.session_state['ans_text_editor'] = combined_ans
-        st.success("🎉 全套完整題目生成完畢！已成功繞過 AI 偷懶防線！")
+        st.success("🎉 全套完整題目生成完畢！")
         st.rerun()
 
 # ==========================================
@@ -580,7 +525,8 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
             display: block !important; 
             clear: both;
         }}
-        .mc-ans {{ color: #ff4b4b; font-weight: bold; }}
+        .mc-circle {{ font-size: 16px; font-weight: normal; margin-right: 4px; }}
+        .mc-ans {{ color: #ff4b4b; font-weight: bold; margin-right: 4px; }}
         
         /* 答題紙橫線區域 */
         .write-zone {{ margin-top: 15px; margin-bottom: 30px; width: 100%; }}
@@ -597,9 +543,9 @@ if st.session_state['generated_exam'] or st.session_state['generated_answers']:
     """
 
     st.download_button(
-        label="📲 iPad 專用：下載無省略、高精細幾何 HTML 列印檔",
+        label="📲 iPad 專用：下載完美全圓圈選項幾何 HTML 列印檔",
         data=html_for_printing,
-        file_name=f"香港小學{grade}_無省略幾何試卷.html",
+        file_name=f"香港小學{grade}_完美圓圈幾何試卷.html",
         mime="text/html",
         use_container_width=True,
         type="primary"
