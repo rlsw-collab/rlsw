@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.9.8：終極修復 GitHub 遠端大型 Base64 JSON 換行造成的解析崩潰，預覽全面開顯！
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.9.8"
+# 🆕 升級 v1.9.9：終極修復！引入 GitHub Raw 大檔案分流綠色通道，徹底解決突破 1MB 限制時的 JSON 碎裂死白問題
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.9.9"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -161,30 +161,23 @@ def list_knowledge_bases_from_github():
     return []
 
 def get_knowledge_base_content(kb_name):
-    path = f"knowledge_base/{kb_name}.json"
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
+    safe_name = re.sub(r'[\\/*?:"<>| ]', '_', kb_name)
+    # 🚀【核心重構線】：為大檔案分流改用 GitHub Raw 原始資料通道，不再走 API content 欄位以免內容被截斷
+    raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/master/knowledge_base/{safe_name}.json"
     headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
+        "Authorization": f"token {GITHUB_TOKEN}"
     }
-    add_log(f"正在向 GitHub 請求獲取檔案路徑: {path}")
+    add_log(f"🚀 開啟大檔案 Raw 綠色通道抓取數據: {raw_url}")
     try:
-        res = requests.get(url, headers=headers)
-        add_log(f"GitHub API 回應狀態碼: {res.status_code}")
+        res = requests.get(raw_url, headers=headers)
+        add_log(f"遠端 Raw 通道回應狀態碼: {res.status_code}")
         if res.status_code == 200:
-            raw_json = res.json()
-            raw_content_str = raw_json["content"]
-            
-            # 🌟【終極核心修復】：移除非法換行與空白字元，防止大型 Base64 數據流解碼碎裂
-            clean_content_str = raw_content_str.replace("\n", "").replace("\r", "").strip()
-            
-            add_log("成功讀取並完成遠端數據脫水清洗。正在進行安全解碼...")
-            content = base64.b64decode(clean_content_str).decode("utf-8")
-            parsed_data = json.loads(content)
-            add_log(f"解析成功！知識庫名稱: {parsed_data.get('kb_name')}, 內含核心圖片張數: {len(parsed_data.get('images', []))}")
+            # 直接下載的就是我們當初存進去的原始 JSON 字串，完全免去 API content 二次轉譯損壞的風險
+            parsed_data = res.json()
+            add_log(f"🎉 原始資料加載成功！知識庫名稱: {parsed_data.get('kb_name')}, 內含圖片張數: {len(parsed_data.get('images', []))}")
             return parsed_data
         else:
-            add_log(f"❌ 讀取失敗。錯誤回應: {res.text}")
+            add_log(f"❌ Raw 通道讀取失敗。狀態碼: {res.status_code}, 錯誤: {res.text}")
     except Exception as ex:
         add_log(f"❌ 發生異常崩潰: {str(ex)}")
     return None
@@ -559,7 +552,7 @@ with tab_exam:
             st.rerun()
 
 # ------------------------------------------
-# TAB 2: 雲端多圖知識庫管理 (全新防碎裂完美預覽版)
+# TAB 2: 雲端多圖知識庫管理 (大檔案 Raw 綠色通道終極無暇版)
 # ------------------------------------------
 with tab_kb:
     st.header("📂 雲端課文/作業/工作紙知識庫管理")
@@ -597,15 +590,14 @@ with tab_kb:
             if selected_edit_kb:
                 current_kb_name = selected_edit_kb
                 
-                # 同步載入遠端數據
+                # 同步載入遠端大檔案
                 if st.session_state['last_loaded_kb'] != selected_edit_kb:
-                    add_log(f"🔄 偵測到選擇切換。開始抓取雲端知識庫：【{selected_edit_kb}】")
                     kb_payload = get_knowledge_base_content(selected_edit_kb)
                     if kb_payload:
                         st.session_state['kb_current_b64_list'] = kb_payload.get("images", [])
                         st.session_state['last_loaded_kb'] = selected_edit_kb
                     else:
-                        add_log("⚠️ 錯誤：無法從 GitHub 獲取到有效的 JSON 酬載數據。")
+                        add_log("⚠️ 錯誤：無法獲取到有效的 JSON 數據流。")
                 
                 st.write("##")
                 st.markdown(f"### 📦 雲端已存檔案預覽（共 {len(st.session_state['kb_current_b64_list'])} 張）：")
@@ -617,7 +609,6 @@ with tab_kb:
                     keep_images = []
                     for img_idx, b64_data in enumerate(st.session_state['kb_current_b64_list']):
                         with cols[img_idx % 4]:
-                            # 🧼【強烈清洗】：清除內含換行符
                             clean_pure_b64 = re.sub(r'\s+', '', str(b64_data))
                             clean_src = clean_pure_b64 if clean_pure_b64.startswith("data:image") else f"data:image/jpeg;base64,{clean_pure_b64}"
                             
@@ -655,7 +646,7 @@ with tab_kb:
     else:
         st.session_state['new_uploaded_cache'] = []
 
-    # 100% 成功渲染新上傳檔案預覽區
+    # 渲染新上傳檔案預覽區
     if st.session_state['new_uploaded_cache']:
         st.markdown("#### 🔍 新上傳檔案即時預覽：")
         preview_cols = st.columns(5)
@@ -688,7 +679,7 @@ with tab_kb:
 
     # 日誌面板
     st.write("##")
-    with st.expander("🛠️ 系統後台偵錯日誌面板 (Debug Logs)", expanded=False):
+    with st.expander("🛠️ 系統後台偵錯日誌面板 (Debug Logs)", expanded=True):
         if st.session_state['debug_logs']:
             log_text = "\n".join(st.session_state['debug_logs'][::-1])
             st.text_area("即時系統軌跡日誌：", value=log_text, height=200, key="system_debug_logs_view")
