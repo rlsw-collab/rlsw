@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.10.1：終極修復！修正主分支為 main，徹底解決 404 Branch not found 儲存失敗問題
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.1"
+# 🆕 升級 v1.10.2：全面校對語法結構，鐵壁修復由全域取代引起的 SyntaxError，確保 main 分支讀寫絕對流暢
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.2"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -93,11 +93,10 @@ def read_from_exam_vault():
     path = get_exam_vault_path()
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
-# 🛠️ GitHub 雲端知識庫 CRUD 雙向強固函數組 (已更正為 main 分支)
+# 🛠️ GitHub 雲端知識庫 CRUD 雙向強固函數組 (完美鎖定 main 分支)
 def upload_knowledge_base_to_github(name, b64_images):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', name)
     path = f"knowledge_base/{safe_name}.json"
-    # 🔒 修正：強制鎖定 main 分支進行查詢與寫入
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref=main"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
@@ -105,11 +104,11 @@ def upload_knowledge_base_to_github(name, b64_images):
     }
     
     sha = None
-    add_log(f"💾 準備儲存更新，正在向 GitHub 查詢舊有檔案的 SHA 標籤...")
+    add_log("💾 準備儲存更新，正在向 GitHub 查詢舊有檔案的 SHA 標籤...")
     res = requests.get(url, headers=headers)
     if res.status_code == 200:
         sha = res.json().get("sha")
-        add_log(f"✅ 成功獲取舊檔案 SHA: {sha}，本次將執行覆蓋覆寫 (Overwrite)。")
+        add_log(f"✅ 成功獲取舊檔案 SHA: {sha}，本次將執行覆蓋覆寫。")
     else:
         add_log(f"💡 未找到舊檔案 SHA (狀態碼: {res.status_code})，本次將視為全新檔案建立。")
         
@@ -125,13 +124,13 @@ def upload_knowledge_base_to_github(name, b64_images):
     put_payload = {
         "message": f"Save knowledge base: {name} [skip ci]",
         "content": content_b64,
-        "branch": "main" # 🔒 修正：明確指示寫入 main 分支
+        "branch": "main"
     }
     if sha:
         put_payload["sha"] = sha
         
     write_url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
-    add_log(f"🚀 正在推送最新數據至 GitHub (main 分支)...")
+    add_log("🚀 正在推送最新數據至 GitHub (main 分支)...")
     put_res = requests.put(write_url, headers=headers, json=put_payload)
     
     add_log(f"🔔 GitHub 儲存回應狀態碼: {put_res.status_code}")
@@ -176,7 +175,6 @@ def list_knowledge_bases_from_github():
 
 def get_knowledge_base_content(kb_name):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', kb_name)
-    # 🚀 修正：改走 main 分支的 Raw 通道
     raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{GITHUB_REPO}/main/knowledge_base/{safe_name}.json"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}"
@@ -515,7 +513,7 @@ with tab_exam:
             geo_rule = ""
             if has_geometry:
                 geo_rule = f"""
-                ⚠️【核心幾何命令】：考量到本次範圍涉及幾何，你必須在題目中穿跨嵌入幾何圖形標記。
+                ⚠️【核心幾何命令】：考量到本次範圍涉及幾何，你必須在題目中穿插嵌入幾何圖形標記。
                 - [GEOMETRIC:three_circles_linear:r1=大圓半徑;r2=中圓半徑;r3=小圓半徑]
                 - [GEOMETRIC:circles_in_rectangle:w=長方形長;h=長方形闊]
                 - [GEOMETRIC:concentric_overlap:d1=大圓直徑]
@@ -536,7 +534,8 @@ with tab_exam:
             task_step = 1.0 / len(tasks) if tasks else 1.0
             
             for idx, (t_title, t_num) in enumerate(tasks):
-                sub_prompt = f"""你是一位香港名校【{subject}科】主任。請為【香港小學{grade}】編寫【{subject}科}】測驗卷的【{t_title}】。
+                # 🔒 完美修復引號閉合與 Prompt 變數結構
+                sub_prompt = f"""你是一位香港名校【{subject}科】主任。請為【香港小學{grade}】編寫【{subject}科】測驗卷的【{t_title}】。
                 本次出題範圍與已提煉的知識庫考點為：「{final_vault_text}」
                 要求寫出全部 {t_num} 題，不准使用省略號。
                 {geo_rule}
@@ -550,6 +549,74 @@ with tab_exam:
             st.session_state['generated_exam'] = combined_exam
             st.session_state['generated_answers'] = combined_ans
             st.rerun()
+
+    # 原始碼微調控制台
+    st.write("---")
+    st.header("📝 步驟三：幾何源碼調校控制台")
+    col_edit1, col_edit2 = st.columns(2)
+    with col_edit1:
+        if 'exam_text_editor' not in st.session_state: st.session_state['exam_text_editor'] = st.session_state['generated_exam']
+        def on_exam_change(): st.session_state['generated_exam'] = st.session_state['exam_text_editor']
+        st.text_area("題目微調：", value=st.session_state['exam_text_editor'], height=350, key="exam_text_editor", on_change=on_exam_change)
+    with col_edit2:
+        if 'ans_text_editor' not in st.session_state: st.session_state['ans_text_editor'] = st.session_state['generated_answers']
+        def on_ans_change(): st.session_state['generated_answers'] = st.session_state['ans_text_editor']
+        st.text_area("答案與詳解微調：", value=st.session_state['ans_text_editor'], height=350, key="ans_text_editor", on_change=on_ans_change)
+
+    # 印刷排版與導出
+    st.write("---")
+    st.header("🎨 步驟四：印刷級幾何排版與打印導出")
+
+    if st.session_state['generated_exam'] or st.session_state['generated_answers']:
+        perfect_exam_html = python_layout_engine(st.session_state['generated_exam'], is_answer_key=False)
+        perfect_ans_html = python_layout_engine(st.session_state['generated_answers'], is_answer_key=True)
+        full_html_content = perfect_exam_html + '<div class="page-break"></div>' + perfect_ans_html
+        
+        trigger_print = st.button("🖨️ 立即啟動手提電腦列印", type="secondary", use_container_width=True)
+        auto_print_js = "window.print();" if trigger_print else ""
+
+        html_for_printing = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta charset="utf-8">
+        <style>
+            html, body {{ background-color: white !important; color: #000000 !important; -webkit-text-fill-color: #000000 !important; }}
+            #exam-body {{ font-family: "Microsoft JhengHei", "微軟正黑體", Arial, sans-serif; padding: 20px; font-size: 16px; line-height: 2.3; }}
+            .exam-title-main {{ font-size: 26px !important; font-weight: 800 !important; text-align: center !important; margin-top: 20px !important; margin-bottom: 15px !important; }}
+            .exam-user-info {{ font-size: 17px !important; font-weight: bold !important; text-align: center !important; margin-bottom: 30px !important; word-spacing: 12px; }}
+            .exam-section-header {{ font-size: 19px !important; font-weight: 800 !important; margin-top: 25px !important; margin-bottom: 12px !important; border-left: 5px solid #000 !important; padding-left: 10px; }}
+            .fill-blank-underline {{ display: inline-block; width: 150px; border-bottom: 1.5px solid #000 !important; margin: 0 10px; height: 18px; vertical-align: bottom; }}
+            .v-frac {{ display: inline-flex; flex-direction: column; vertical-align: middle; text-align: center; line-height: 1.0; padding: 0 4px; font-size: 0.85em; }}
+            .v-frac .num {{ border-bottom: 1.5px solid #000; padding-bottom: 2px; min-width: 14px; }}
+            .v-frac .den {{ padding-top: 2px; min-width: 14px; }}
+            .mc-option {{ margin-left: 20px; margin-top: 6px; margin-bottom: 6px; display: block !important; clear: both; }}
+            .mc-circle {{ font-size: 16px; font-weight: normal; margin-right: 4px; font-family: sans-serif; }}
+            .mc-ans {{ color: #ff4b4b; font-weight: bold; margin-right: 4px; font-family: sans-serif; }}
+            .write-zone {{ margin-top: 15px; margin-bottom: 30px; width: 100%; }}
+            .row-line {{ width: 100%; height: 38px; border-bottom: 1px dashed #999 !important; }}
+            .page-break {{ page-break-before: always; }}
+        </style>
+        </head>
+        <body>
+            <div id="exam-body">{full_html_content}</div>
+            <script>{auto_print_js}</script>
+        </body>
+        </html>
+        """
+
+        st.download_button(
+            label="📲 iPad 專用：下載完美全圓圈選項幾何 HTML 列印檔",
+            data=html_for_printing,
+            file_name=f"香港小學{grade}_試卷.html",
+            mime="text/html",
+            use_container_width=True,
+            type="primary"
+        )
+
+        st.write("##")
+        import streamlit.components.v1 as components
+        components.html(html_for_printing, height=1200, scrolling=True)
 
 # ------------------------------------------
 # TAB 2: 雲端多圖知識庫管理 (相容 main 分支終極版)
