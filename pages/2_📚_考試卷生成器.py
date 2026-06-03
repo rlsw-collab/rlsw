@@ -94,7 +94,7 @@ def read_from_exam_vault():
     path = get_exam_vault_path()
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
-# ==========================================
+## ==========================================
 # 🛡️ GitHub 雲端實時計數同步邏輯 (防衝突 ＆ 安全自癒)
 # ==========================================
 def get_hkt_date_str():
@@ -162,7 +162,35 @@ def increment_github_counter(counter_type):
             st.toast(f"⚠️ 雲端計數器同步失敗: {str(e)}", icon="❌")
             time.sleep(0.5)
 
+## ==========================================
+# 🧠 結構化 JSON 欄位修補與安全展平防護器
 # ==========================================
+def ensure_flat_string(val):
+    """
+    防護核心：若 AI 回傳了巢狀的 Dictionary 或 List 結構，
+    自動且漂亮地將其還原成人類易讀的排版純文字，徹底阻斷 'dict' has no attribute 'replace' 報錯。
+    """
+    if val is None:
+        return ""
+    if isinstance(val, str):
+        return val
+    if isinstance(val, list):
+        return "\n".join(ensure_flat_string(item) for item in val)
+    if isinstance(val, dict):
+        lines = []
+        for k, v in val.items():
+            k_clean = str(k).strip()
+            # 針對常見考卷屬性進行人性化文本還原
+            if k_clean.lower() in ["title", "header", "name", "subject", "grade"]:
+                lines.append(ensure_flat_string(v))
+            elif k_clean.lower() in ["questions", "items", "choices", "options", "body", "content", "exam_body", "answer_body"]:
+                lines.append(ensure_flat_string(v))
+            else:
+                lines.append(f"{k_clean}: {ensure_flat_string(v)}")
+        return "\n".join(lines)
+    return str(val)
+
+## ==========================================
 # 🛡️ 題目生成：100% 專用 GitHub Green 通道 GPT-4o 旗艦引擎
 # ==========================================
 def call_github_green_gpt4o_generation(text_prompt):
@@ -184,7 +212,7 @@ def call_github_green_gpt4o_generation(text_prompt):
         "messages": [
             {
                 "role": "system", 
-                "content": "You are a professional JSON output assistant. You must return a strict JSON object with fields 'exam_body' and 'answer_body' without any markdown block formatting."
+                "content": "You are a professional JSON output assistant. You must return a JSON object with exactly two fields 'exam_body' and 'answer_body'. Both fields MUST be pure flat strings containing standard text formatting with explicit literal newlines (\\n). DO NOT output nested dictionaries or lists under these fields."
             },
             {"role": "user", "content": text_prompt}
         ],
@@ -245,7 +273,7 @@ def do_gemini_ocr_with_fallback(b64_list, gemini_token):
             continue
     return "❌ 圖片辨識失敗，所有 Google 免費通道均超時，請稍候重試或手動輸入。"
 
-# ==========================================
+## ==========================================
 # 🚀 🚀 Python 終極分數與視覺排版引擎 🚀 🚀
 # ==========================================
 def convert_to_vertical_fractions(text_content):
@@ -311,7 +339,7 @@ def python_layout_engine(raw_text, is_answer_key=False):
         
     return "\n".join(processed_lines)
 
-# ==========================================
+## ==========================================
 # 3. Streamlit 網頁佈局
 # ==========================================
 if 'generated_exam' not in st.session_state: st.session_state['generated_exam'] = ""
@@ -369,7 +397,7 @@ else:
 
 st.write("##")
 
-# 🚀 點擊生成：100% 呼叫 GitHub 綠色通道 (GPT-4o) 出題
+## 🚀 點擊生成：100% 呼叫 GitHub 綠色通道 (GPT-4o) 出題
 btn_call_ai = st.button("🚀 呼叫 AI 綠色通道生成新題目 🤖", type="secondary", use_container_width=True)
 
 if btn_call_ai:
@@ -402,9 +430,14 @@ if btn_call_ai:
             parsed_json, used_model = call_github_green_gpt4o_generation(text_prompt)
             
             try:
-                if parsed_json and "exam_body" in parsed_json:
-                    ex_body = parsed_json.get("exam_body", "").replace("\\n", "\n").replace("\\\\n", "\n")
-                    ans_body = parsed_json.get("answer_body", "").replace("\\n", "\n").replace("\\\\n", "\n")
+                if parsed_json and ("exam_body" in parsed_json or "answer_body" in parsed_json):
+                    # 🌟 安全防禦核心：調用 ensure_flat_string 把可能發生的 nested-dictionary 降維並無損拍平成 str 
+                    ex_raw = parsed_json.get("exam_body", "")
+                    ans_raw = parsed_json.get("answer_body", "")
+                    
+                    ex_body = ensure_flat_string(ex_raw).replace("\\n", "\n").replace("\\\\n", "\n")
+                    ans_body = ensure_flat_string(ans_raw).replace("\\n", "\n").replace("\\\\n", "\n")
+                    
                     st.session_state['generated_exam'] = ex_body
                     st.session_state['generated_answers'] = ans_body
                     st.session_state['exam_text_editor'] = ex_body
@@ -416,7 +449,7 @@ if btn_call_ai:
             except Exception as e: 
                 st.error(f"❌ 解析出題 JSON 數據結構失敗。原因: {str(e)}")
 
-# ==========================================
+## ==========================================
 # 3. 獨立原始碼控制台 (雙區獨立)
 # ==========================================
 st.write("---")
@@ -433,7 +466,7 @@ with col_edit2:
     def on_ans_change(): st.session_state['generated_answers'] = st.session_state['ans_text_editor']
     st.text_area("答案微調：", value=st.session_state['ans_text_editor'], height=450, key="ans_text_editor", on_change=on_ans_change)
 
-# ==========================================
+## ==========================================
 # 4. 視覺排版與控制台
 # ==========================================
 st.write("---")
