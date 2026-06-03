@@ -14,8 +14,8 @@ import io
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.7.8：MC 全選項圓圈完美版 (修復 B/C/D 換行後失去圓圈的 Bug)
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.7.8"
+# 🆕 升級 v1.7.9：動態幾何圖形參數 (修復 GPT-4o 照抄死數字與出錯圖形範圍問題)
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.7.9"
 
 if 'authenticated' not in st.session_state:
     st.session_state['authenticated'] = False
@@ -235,8 +235,8 @@ def draw_svg_geometry(marker_str):
                 <circle cx="45" cy="75" r="2.5" fill="black"/><text x="40" y="95" font-size="13" font-family="sans-serif">P</text>
                 <circle cx="85" cy="75" r="2.5" fill="black"/><text x="80" y="95" font-size="13" font-family="sans-serif">Q</text>
                 <circle cx="180" cy="75" r="2.5" fill="black"/><text x="175" y="95" font-size="13" font-family="sans-serif">R</text>
-                <text x="50" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑 {r1}cm</text>
-                <text x="165" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑 {r3}cm</text>
+                <text x="50" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑 {r1}</text>
+                <text x="165" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑 {r3}</text>
             </svg>
             </div>
             """
@@ -252,8 +252,8 @@ def draw_svg_geometry(marker_str):
                 <circle cx="170" cy="70" r="50" stroke="black" stroke-width="1.5" fill="none" />
                 <line x1="70" y1="70" x2="120" y2="70" stroke="black" stroke-width="1.2" />
                 <circle cx="70" cy="70" r="2" fill="black" />
-                <text x="110" y="15" font-size="12" font-weight="bold" font-family="sans-serif">長方形長 = {w} cm</text>
-                <text x="25" y="65" font-size="11" font-family="sans-serif" transform="rotate(-90 25,65)">闊 = {h} cm</text>
+                <text x="110" y="15" font-size="12" font-weight="bold" font-family="sans-serif">長 = {w}</text>
+                <text x="25" y="65" font-size="11" font-family="sans-serif" transform="rotate(-90 25,65)">闊 = {h}</text>
             </svg>
             </div>
             """
@@ -269,7 +269,7 @@ def draw_svg_geometry(marker_str):
                 <text x="115" y="75" font-size="12" font-family="sans-serif">O (大圓心)</text>
                 <circle cx="110" cy="110" r="2" fill="black" />
                 <line x1="110" y1="20" x2="110" y2="140" stroke="black" stroke-width="1" stroke-dasharray="3" />
-                <text x="115" y="50" font-size="11" font-weight="bold" font-family="sans-serif">大圓直徑 = {d1}cm</text>
+                <text x="115" y="50" font-size="11" font-weight="bold" font-family="sans-serif">大圓直徑 = {d1}</text>
             </svg>
             </div>
             """
@@ -283,8 +283,8 @@ def draw_svg_geometry(marker_str):
                 <polygon points="40,120 200,120 150,30" stroke="black" stroke-width="1.8" fill="none" />
                 <line x1="150" y1="30" x2="150" y2="120" stroke="black" stroke-width="1.2" stroke-dasharray="3" />
                 <rect x="145" y="115" width="5" height="5" stroke="black" stroke-width="1" fill="none" />
-                <text x="100" y="135" font-size="12" font-weight="bold" font-family="sans-serif">底 = {b} cm</text>
-                <text x="160" y="80" font-size="12" font-weight="bold" font-family="sans-serif">高 = {h} cm</text>
+                <text x="100" y="135" font-size="12" font-weight="bold" font-family="sans-serif">底 = {b}</text>
+                <text x="160" y="80" font-size="12" font-weight="bold" font-family="sans-serif">高 = {h}</text>
             </svg>
             </div>
             """
@@ -302,9 +302,9 @@ def draw_svg_geometry(marker_str):
                 <line x1="40" y1="120" x2="90" y2="90" stroke="black" stroke-width="1.2" stroke-dasharray="3" />
                 <line x1="90" y1="90" x2="210" y2="90" stroke="black" stroke-width="1.2" stroke-dasharray="3" />
                 <line x1="90" y1="90" x2="90" y2="30" stroke="black" stroke-dasharray="3" stroke-width="1.2" />
-                <text x="80" y="138" font-size="12" font-weight="bold" font-family="sans-serif">長 = {l} cm</text>
-                <text x="185" y="110" font-size="12" font-weight="bold" font-family="sans-serif">闊 = {w} cm</text>
-                <text x="10" y="90" font-size="12" font-weight="bold" font-family="sans-serif">高 = {h} cm</text>
+                <text x="80" y="138" font-size="12" font-weight="bold" font-family="sans-serif">長 = {l}</text>
+                <text x="185" y="110" font-size="12" font-weight="bold" font-family="sans-serif">闊 = {w}</text>
+                <text x="10" y="90" font-size="12" font-weight="bold" font-family="sans-serif">高 = {h}</text>
             </svg>
             </div>
             """
@@ -359,28 +359,22 @@ def python_layout_engine(raw_text, is_answer_key=False):
             processed_lines.append(f'<div>{line}</div>')
             continue
 
-        # 4. 🌟 終極修復：多項選擇題（MC）人人有圓圈引擎
-        # 尋找行內是否包含 A., B., C., D. (無論是一起出現還是單獨成行)
+        # 4. 🌟 多項選擇題（MC）人人有圓圈引擎
         opt_starts = list(re.finditer(r'[○●]?\s*[A-D]\.\s+', line))
         
         if opt_starts:
             first_idx = opt_starts[0].start()
             question_part = line[:first_idx].strip()
             
-            # 若前面有題目文字，先把它吐出來
             if question_part:
                 processed_lines.append(f'<div class="question-text">{question_part}</div>')
             
-            # 抽出所有的選項內容，並根據 A., B., C., D. 的規律完美切割
             options_text = line[first_idx:]
             options = re.findall(r'([○●]?\s*[A-D]\.\s+.*?(?=\s*[○●]?\s*[A-D]\.\s+|$))', options_text)
             
             for opt in options:
                 opt_str = opt.strip()
-                # 判斷是否為答案（如果有黑圓圈，或是正處於答案頁）
                 is_correct = "●" in opt
-                
-                # 剔除原有文字中的 ○ 或 ● 標籤，確保排版整齊統一
                 opt_str = re.sub(r'^[○●]\s*', '', opt_str).strip()
                 
                 if is_correct or (is_answer_key and "●" in line):
@@ -452,18 +446,21 @@ if btn_call_ai:
     else:
         final_vault_text = read_from_exam_vault()
         
-        has_geometry = any(kw in final_vault_text for kw in ["圓", "三角", "面積", "體積"])
+        has_geometry = any(kw in final_vault_text for kw in ["圓", "三角", "面積", "體積", "長方體", "正方體"])
         
         geo_rule = ""
         if has_geometry:
-            geo_rule = """
-            ⚠️【核心幾何命令】：考量到本範圍涉及幾何，你必須在題目中穿插嵌入幾何圖形標記，絕對不能漏掉。
-            圖形標記格式必須單獨佔一行：
-            - [GEOMETRIC:three_circles_linear:r1=10;r2=5;r3=7] (用於圓形性質題)
-            - [GEOMETRIC:circles_in_rectangle:w=24;h=12] (用於長方形切圓題)
-            - [GEOMETRIC:concentric_overlap:d1=16] (用於同心重疊圓題)
-            - [GEOMETRIC:triangle:b=15;h=10] (若涉及三角形面積計算)
-            - [GEOMETRIC:cuboid_volume:l=12;w=8;h=5] (若涉及長方體/正方體體積計算)
+            geo_rule = f"""
+            ⚠️【核心幾何命令】：考量到本次範圍涉及幾何，你必須在題目中穿插嵌入幾何圖形標記。
+            🔥【絕對指令 1 - 範圍匹配】：請「嚴格限制」只選用與給定範圍概念相關的圖形！例如範圍只寫了「三角形」，就絕對不准出「圓形」或「長方體」題目！
+            🔥【絕對指令 2 - 動態參數】：標記中的參數數值 (如 w, h, r1, b, l 等) 必須根據你當前出題的實際數字「動態填入」，絕對不能照抄下方範例的死數字！
+            
+            可選用的標記格式 (請將中文描述替換成你出題時的實際數字，例如題目三角形底是20，高是8，則輸出 [GEOMETRIC:triangle:b=20;h=8])：
+            - [GEOMETRIC:three_circles_linear:r1=大圓半徑;r2=中圓半徑;r3=小圓半徑] (僅限範圍含圓形性質時使用)
+            - [GEOMETRIC:circles_in_rectangle:w=長方形長;h=長方形闊] (僅限範圍含長方形與圓時使用)
+            - [GEOMETRIC:concentric_overlap:d1=大圓直徑] (僅限範圍含同心圓時使用)
+            - [GEOMETRIC:triangle:b=三角形底;h=三角形高] (僅限範圍含三角形時使用)
+            - [GEOMETRIC:cuboid_volume:l=長方體長;w=長方體闊;h=長方體高] (僅限範圍含立體體積時使用)
             """
 
         tasks = []
@@ -482,6 +479,7 @@ if btn_call_ai:
             st.toast(f"⏳ 正在生成{t_title}... 拒絕任何省略號！", icon="📝")
             
             sub_prompt = f"""你是一位香港名校數學科組長。請為【香港小學{grade}】編寫【{subject}科】測驗卷的【{t_title}】。
+            本次出題範圍/重點為：「{final_vault_text}」
             
             要求：
             1. 必須完整地生成全部 {t_num} 道題目，每一題都要寫出具體文字。
