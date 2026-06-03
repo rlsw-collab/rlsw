@@ -39,7 +39,7 @@ def read_from_vault():
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
 # ==========================================
-# 🛡️ GitHub 雲端實時計數同步邏輯 (防衝突)
+# 🛡️ GitHub 雲端實時計數同步邏輯 (防衝突 ＆ 安全自癒修復)
 # ==========================================
 def get_hkt_date_str():
     tz_hkt = datetime.timezone(datetime.timedelta(hours=8))
@@ -75,12 +75,20 @@ def increment_github_counter(counter_type):
                 counter = default_counter
                 sha = None
                 
+            # 🌟 核心修復：安全自癒 (Auto-Schema Patching)
+            # 如果發現雲端舊 JSON 缺少 dictation_tool 或 exam_tool，自動在記憶體中補齊，防止 KeyError 崩潰
+            if "exam_tool" not in counter:
+                counter["exam_tool"] = {"main": 0, "backup": 0}
+            if "dictation_tool" not in counter:
+                counter["dictation_tool"] = {"main": 0, "backup": 0}
+                
+            # 檢查是否需要跨日重置
             if counter.get("last_reset_date") != today_str:
                 counter["last_reset_date"] = today_str
                 counter["exam_tool"] = {"main": 0, "backup": 0}
                 counter["dictation_tool"] = {"main": 0, "backup": 0}
                 
-            # 🌟 精準加算至默書工具專屬欄位
+            # 累加默書工具計數器
             counter["dictation_tool"][counter_type] += 1
             
             content_str = json.dumps(counter, indent=2)
@@ -97,7 +105,8 @@ def increment_github_counter(counter_type):
                 st.toast(f"📊 默書雲端配額同步成功！今日已用「{counter_type}」：{counter['dictation_tool'][counter_type]} 次", icon="📝")
                 break
             time.sleep(0.5)
-        except:
+        except Exception as e:
+            st.toast(f"⚠️ 雲端計數器同步失敗: {str(e)}", icon="❌")
             time.sleep(0.5)
 
 # ==========================================================
@@ -198,7 +207,7 @@ def convert_image_to_base64(uploaded_file):
     image.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-# 🆕 升級為 Google 三路純免費高可用 OCR 鏈條
+# 🆕 升級為 Google 三路純免費高可用 OCR 鏈條 (完美對接 Counter)
 def gemini_vision_extract_bilingual(base64_images_list, mode="中文"):
     if not base64_images_list: return ""
     if not GEMINI_TOKEN: return "錯誤：未在 Secrets 中設定 GEMINI_TOKEN！"
@@ -229,7 +238,7 @@ def gemini_vision_extract_bilingual(base64_images_list, mode="中文"):
         try:
             res = requests.post(url, headers={"Content-Type": "application/json"}, json=payload, timeout=50)
             if res.status_code == 200:
-                # 🌟 識別成功：同步雲端計數器
+                # 🌟 識別成功：同步雲端計數器至對應的主攻（Flash）或後備（Pro/v3）欄位
                 c_type = "main" if model_id == "gemini-2.5-flash" else "backup"
                 increment_github_counter(c_type)
                 return res.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
@@ -329,7 +338,7 @@ def smart_split_sentence_bilingual(text, target_len=14, mode="中文"):
                 current_chunk = ""
                 current_char_count = 0
         if current_chunk.strip():
-            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "結構】")
+            chunk_restore = current_chunk.replace("【冒引】", "：「").replace("【句引】", "。」")
             chunk_restore = chunk_restore.replace("【開書名】", "《").replace("【關書名】", "》")
             chunk_restore = chunk_restore.replace("【破折】", "——")
             sub_sentences.append(chunk_restore)
