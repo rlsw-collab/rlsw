@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.10.7：終極無快取直連版！捨棄 raw CDN，改用 GitHub API 原生 v3.raw 協議，徹底擊碎 5 分鐘快取延遲，實現 100% 即時讀寫同步！
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.7"
+# 🆕 升級 v1.10.8：終極修飾版！移除所有 Debug 日誌介面令畫面極致清爽，並在 TAB 1 引入具備智能快取的「唯讀預覽區」
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.8"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -74,11 +74,6 @@ except Exception as e:
     st.error("❌ 未能在 Streamlit Secrets 中找到基礎憑證 (GIT_TOKEN)。")
     st.stop()
 
-if 'debug_logs' not in st.session_state: st.session_state['debug_logs'] = []
-def add_log(msg):
-    now = datetime.datetime.now().strftime("%H:%M:%S")
-    st.session_state['debug_logs'].append(f"[{now}] {msg}")
-
 def get_exam_vault_path():
     from streamlit.runtime.scriptrunner import get_script_run_ctx
     ctx = get_script_run_ctx()
@@ -93,11 +88,10 @@ def read_from_exam_vault():
     path = get_exam_vault_path()
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
-# 🛠️ GitHub 雲端知識庫 CRUD
+# 🛠️ GitHub 雲端知識庫 CRUD (已移除所有 log 代碼)
 def upload_knowledge_base_to_github(name, b64_images, status_ui=None):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', name)
     path = f"knowledge_base/{safe_name}.json"
-    
     url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}?ref=main&t={int(time.time())}"
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
@@ -107,12 +101,9 @@ def upload_knowledge_base_to_github(name, b64_images, status_ui=None):
     
     sha = None
     if status_ui: status_ui.info("⏳ [1/3] 正在與 GitHub 核心資料庫驗證狀態...")
-    add_log(f"開始儲存程序：查詢 {name} 是否存在舊檔案...")
-    
     res = requests.get(url, headers=headers)
     if res.status_code == 200:
         sha = res.json().get("sha")
-        add_log(f"找到舊檔案 SHA: {sha}，將進行覆寫更新。")
     
     if status_ui: status_ui.info("⏳ [2/3] 正在將圖片安全編碼...")
     payload_data = {
@@ -131,18 +122,9 @@ def upload_knowledge_base_to_github(name, b64_images, status_ui=None):
     if sha: put_payload["sha"] = sha
         
     write_url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}"
-    
-    if status_ui: status_ui.info("🚀 [3/3] 正在極速上傳至 GitHub 雲端，大檔案傳輸約需 3-5 秒，請稍候...")
-    add_log(f"推送大數據至雲端，總張數：{len(b64_images)}")
-    
+    if status_ui: status_ui.info("🚀 [3/3] 正在極速上傳至 GitHub 雲端，請稍候...")
     put_res = requests.put(write_url, headers=headers, json=put_payload)
-    
-    if put_res.status_code in [200, 201]:
-        add_log(f"✅ 成功寫入！狀態碼: {put_res.status_code}")
-        return True
-    else:
-        add_log(f"❌ 儲存失敗！錯誤碼 {put_res.status_code}: {put_res.text}")
-        return False
+    return put_res.status_code in [200, 201]
 
 def delete_knowledge_base_from_github(name):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', name)
@@ -182,31 +164,21 @@ def list_knowledge_bases_from_github():
 
 def get_knowledge_base_content(kb_name, status_ui=None):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', kb_name)
-    # 🌟 破冰絕招：改用 GitHub API 核心路徑，放棄 raw.githubusercontent 慢速 CDN
     api_raw_url = f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/knowledge_base/{safe_name}.json?ref=main&t={int(time.time())}"
-    
     headers = {
         "Authorization": f"token {GITHUB_TOKEN}",
-        # 🌟 魔法標頭：強制 GitHub API 直接吐出原生檔案內容，無視 1MB 限制且絕對不留 CDN 快取！
         "Accept": "application/vnd.github.v3.raw",
         "Cache-Control": "no-cache"
     }
     
-    if status_ui: status_ui.info("⏳ 正在由 GitHub 核心資料庫直連下載最新大檔案資料，請稍候...")
-    add_log(f"啟動 API 原生協議抓取 (擊碎 CDN): {api_raw_url}")
-    
+    if status_ui: status_ui.info("⏳ 正在由 GitHub 核心資料庫直連下載最新資料...")
     try:
         res = requests.get(api_raw_url, headers=headers)
         if res.status_code == 200:
-            # 由於用咗 v3.raw，返回嘅就係完美乾淨嘅 JSON 原始字串
-            parsed_data = res.json()
-            add_log(f"🎉 零延遲新鮮讀取成功！共 {len(parsed_data.get('images', []))} 張圖。")
             if status_ui: status_ui.empty() 
-            return parsed_data
-        else:
-            add_log(f"❌ 讀取失敗。狀態碼: {res.status_code}")
+            return res.json()
     except Exception as ex:
-        add_log(f"❌ 發生異常: {str(ex)}")
+        pass
     return None
 
 def ensure_flat_string(val):
@@ -447,11 +419,13 @@ if 'working_images' not in st.session_state: st.session_state['working_images'] 
 if 'working_kb_name' not in st.session_state: st.session_state['working_kb_name'] = ""
 if 'uploader_key_counter' not in st.session_state: st.session_state['uploader_key_counter'] = 0
 
-# 🌟 核心引擎：洗淨還原至 Ready-To-Use 狀態
+# 🌟 TAB 1 專用快取，確保滑動 Slider 時不會重複抓圖
+if 'tab1_loaded_kb_name' not in st.session_state: st.session_state['tab1_loaded_kb_name'] = ""
+if 'tab1_loaded_kb_images' not in st.session_state: st.session_state['tab1_loaded_kb_images'] = []
+
 def reset_kb_state():
     st.session_state['working_images'] = []
     st.session_state['working_kb_name'] = ""
-    st.session_state['debug_logs'] = []
     st.session_state['uploader_key_counter'] += 1
 
 # ------------------------------------------
@@ -499,10 +473,30 @@ with tab_exam:
         else:
             selected_kb = st.selectbox("📂 選擇你要對接的知識庫資料：", available_kbs, key="tab1_kb_selector")
             if selected_kb:
-                kb_data = get_knowledge_base_content(selected_kb)
-                if kb_data:
-                    st.success(f"✅ 已成功加載知識庫「{selected_kb}」，內含 {len(kb_data.get('images', []))} 張課本/工作紙檔案圖片。")
-                    chosen_kb_images = kb_data.get('images', [])
+                # 🛡️ 快取保護機制：只有在真正轉換知識庫時，才向 GitHub 請求大檔案
+                if selected_kb != st.session_state['tab1_loaded_kb_name']:
+                    tab1_loading_box = st.empty()
+                    kb_data = get_knowledge_base_content(selected_kb, status_ui=tab1_loading_box)
+                    if kb_data:
+                        st.session_state['tab1_loaded_kb_images'] = kb_data.get('images', [])
+                        st.session_state['tab1_loaded_kb_name'] = selected_kb
+                    else:
+                        st.session_state['tab1_loaded_kb_images'] = []
+                        st.session_state['tab1_loaded_kb_name'] = selected_kb
+                
+                chosen_kb_images = st.session_state['tab1_loaded_kb_images']
+
+                # 👁️ TAB 1 唯讀預覽區
+                if chosen_kb_images:
+                    st.success(f"✅ 已成功加載知識庫「{selected_kb}」，內含 {len(chosen_kb_images)} 張課本/工作紙檔案圖片。")
+                    
+                    with st.expander("👁️ 展開 / 收起雲端知識庫相片預覽 (唯讀)", expanded=True):
+                        cols = st.columns(4)
+                        for i, b64_data in enumerate(chosen_kb_images):
+                            with cols[i % 4]:
+                                clean_src = b64_data if b64_data.startswith("data:image") else f"data:image/jpeg;base64,{b64_data}"
+                                st.image(clean_src, use_container_width=True)
+                    
                     final_vault_text = f"[使用雲端 GitHub 知識庫圖片庫: {selected_kb}]"
 
     st.write("##")
@@ -690,6 +684,11 @@ with tab_kb:
                         st.session_state['working_images'] = kb_payload.get("images", [])
                         st.session_state['working_kb_name'] = selected_edit_kb
                         st.success(f"🎉 已成功秒速載入最新版「{selected_edit_kb}」！現在你可以追加或刪減檔案。")
+                        
+                        # 🔄 同步更新 TAB 1 的預覽快取，確保兩邊數據一致
+                        st.session_state['tab1_loaded_kb_images'] = st.session_state['working_images']
+                        st.session_state['tab1_loaded_kb_name'] = selected_edit_kb
+                        
                         time.sleep(0.8)
                         st.rerun()
             with col_del:
@@ -699,6 +698,11 @@ with tab_kb:
                         loading_status_box.info("⏳ 正在由 GitHub 徹底刪除知識庫...")
                         if delete_knowledge_base_from_github(selected_edit_kb):
                             st.success(f"🔥 雲端知識庫「{selected_edit_kb}」已徹底抹除！")
+                            # 🔄 同步清除 TAB 1 快取
+                            if st.session_state['tab1_loaded_kb_name'] == selected_edit_kb:
+                                st.session_state['tab1_loaded_kb_name'] = ""
+                                st.session_state['tab1_loaded_kb_images'] = []
+                                
                             time.sleep(0.8)
                             reset_kb_state()
                             st.rerun()
@@ -709,7 +713,7 @@ with tab_kb:
             else:
                 st.warning("💡 請先選擇上方的知識庫並按下「📥 載入最新版」按鈕。")
 
-    # 🌟 終極統一上傳與管理工作區
+    # 🌟 上傳與檔案管理區
     if show_workspace:
         st.write("---")
         st.markdown("### 📥 上傳與檔案管理區")
@@ -723,8 +727,6 @@ with tab_kb:
                 if clean_new_b64 not in st.session_state['working_images']:
                     st.session_state['working_images'].append(clean_new_b64)
                     new_added = True
-            if new_added:
-                add_log(f"📥 成功追加新檔案。目前總張數：{len(st.session_state['working_images'])}")
 
         if st.session_state['working_images']:
             st.markdown(f"#### 🔍 檔案預覽與管理（共 {len(st.session_state['working_images'])} 張）")
@@ -752,15 +754,13 @@ with tab_kb:
                 if success:
                     save_status_box.success("🎉 儲存成功！網頁即將洗淨並重置為初始狀態...")
                     st.toast("🎉 雲端知識庫儲存成功！", icon="✅")
+                    
+                    # 🔄 儲存後同步更新 TAB 1 的預覽快取
+                    st.session_state['tab1_loaded_kb_name'] = st.session_state['working_kb_name'].strip()
+                    st.session_state['tab1_loaded_kb_images'] = st.session_state['working_images'].copy()
+                    
                     time.sleep(1.5)
                     reset_kb_state()
                     st.rerun()
                 else:
-                    save_status_box.error("❌ 同步失敗！請立刻查看下方黃色偵錯面板獲取 GitHub API 的具體拒絕原因。")
-
-    # 日誌面板
-    st.write("##")
-    with st.expander("🛠️ 系統後台偵錯日誌面板 (Debug Logs)", expanded=False):
-        if st.session_state['debug_logs']:
-            log_text = "\n".join(st.session_state['debug_logs'][::-1])
-            st.text_area("即時系統軌跡日誌：", value=log_text, height=200, key="system_debug_logs_view")
+                    save_status_box.error("❌ 同步失敗！權限或連線發生錯誤。")
