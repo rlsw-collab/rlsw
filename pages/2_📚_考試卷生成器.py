@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.11.4：印刷級詳解修復版！完美洗淨答案頁中的 LaTeX 語法殘留，全面支援詳解區分數直式化與數學運算子（×、÷）美化！
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.4"
+# 🆕 升級 v1.11.5：TextBox 完全修復版！修正步驟二字串比對多出一個「幾」字的致命 Typo，100% 恢復核心概念手動輸入框！
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.5"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -338,26 +338,16 @@ def draw_svg_geometry(marker_str):
 # ==========================================
 def convert_to_vertical_fractions(text_content):
     if not text_content: return ""
-    # 🌟 核心升級：徹底洗淨 LaTeX 數學符號殘留與特殊運算子
     text_content = re.sub(r'\\\(\s*\\frac\{\s*([^}]+)\s*\}\{\s*([^}]+)\s*\}\s*\\\)', r'\1/\2', text_content)
     text_content = re.sub(r'\\frac\{\s*([^}]+)\s*\}\{\s*([^}]+)\s*\}', r'\1/\2', text_content)
     text_content = text_content.replace(r'\times', ' × ').replace(r'\div', ' ÷ ')
     text_content = text_content.replace(r'\(', ' ').replace(r'\)', ' ')
 
-    # 1. 處理帶分數「X又Y分之Z」或「X又Y/Z」
     text_content = re.sub(r'(\d+)\s*又\s*(\d+)\s*分之\s*(\d+)', r'\1<span class="v-frac"><span class="num">\3</span><span class="den">\2</span></span>', text_content)
     text_content = re.sub(r'(\d+)\s*又\s*(\d+)/(\d+)', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
-    
-    # 2. 處理括號或離體帶分數
     text_content = re.sub(r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
-    
-    # 3. 處理純分數「X分之Y」
     text_content = re.sub(r'(\d+)\s*分之\s*(\d+)', r'<span class="v-frac"><span class="num">\2</span><span class="den">\1</span></span>', text_content)
-    
-    # 4. 捕捉因為換行或空格被拆散的「離體分數」（例如 "3 5" 中間夾雜空格）
     text_content = re.sub(r'(?<!\d)(\d+)\s+([\d\+\-]+)(?!\d)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
-
-    # 5. 處理所有裸露的標準斜線分數（如：3/5 或 (3+2)/5）
     text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)([\d\+\-]+)/([\d\+\-]+)(?!\d)(?!>)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
     return text_content
 
@@ -411,7 +401,6 @@ def python_layout_engine(raw_text, is_answer_key=False):
                     processed_lines.append(f'<div class="mc-option"><span class="mc-circle">○</span> {opt_str}</div>')
             continue
 
-        # 🌟 答案與詳解頁專用渲染強固通道
         if is_answer_key and (clean_line.startswith("詳解：") or re.match(r'^\d+\.', clean_line) or clean_line.startswith("答案是")):
             line = convert_to_vertical_fractions(line)
             processed_lines.append(f'<div style="margin-bottom:8px; line-height:2.5;">{line}</div>')
@@ -485,7 +474,8 @@ with tab_exam:
     final_vault_text = ""
     chosen_kb_images = []
     
-    if scope_mode == "在此修改或輸入幾幾何範圍核心概念：":
+    # 🌟 完美修復點：移除多餘的「幾」字，確保精準進入判斷式顯示 TextBox
+    if scope_mode == "在此修改或輸入幾何範圍核心概念：":
         text_input_val = st.text_area("✍️ 請輸入核心概念或課文範圍：", value=current_vault_ocr, height=150, key="ocr_box_editor")
         if text_input_val != current_vault_ocr:
             write_to_exam_vault(text_input_val)
@@ -577,7 +567,7 @@ with tab_exam:
             task_step = 1.0 / len(tasks) if tasks else 1.0
             
             for idx, (t_title, t_num) in enumerate(tasks):
-                sub_prompt = f"""你是一位香港名校【{subject}科】主任。請為【香港小學{grade}】編寫【{subject}科】測驗卷的【{t_title}】。
+                sub_prompt = f"""你是一位香港名校【{subject}科】主任。請為【香港小學{grade}】編寫【{subject}科}測驗卷的【{t_title}】。
                 本次出題範圍與已提煉的知識庫考點為：「{final_vault_text}」
                 要求寫出全部 {t_num} 題，不准使用省略號。
                 {geo_rule}
