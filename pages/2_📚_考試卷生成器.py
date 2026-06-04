@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.10.8：終極修飾版！移除所有 Debug 日誌介面令畫面極致清爽，並在 TAB 1 引入具備智能快取的「唯讀預覽區」
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.8"
+# 🆕 升級 v1.10.9：修復 JSON 輸出崩潰！強制鎖定 GPT-4o 的 JSON Keys 結構，加入 AI 錯誤攔截器，徹底解決「生成一片空白」的問題。
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.9"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -88,7 +88,7 @@ def read_from_exam_vault():
     path = get_exam_vault_path()
     return open(path, "r", encoding="utf-8").read() if os.path.exists(path) else ""
 
-# 🛠️ GitHub 雲端知識庫 CRUD (已移除所有 log 代碼)
+# 🛠️ GitHub 雲端知識庫 CRUD 
 def upload_knowledge_base_to_github(name, b64_images, status_ui=None):
     safe_name = re.sub(r'[\\/*?:"<>| ]', '_', name)
     path = f"knowledge_base/{safe_name}.json"
@@ -197,7 +197,7 @@ def ensure_flat_string(val):
     return str(val)
 
 # ==========================================
-# 🛡️ AI 核心生成通道
+# 🛡️ AI 核心生成通道 (增強穩定性與錯誤攔截)
 # ==========================================
 def call_pure_free_multiverse_ai(messages, is_json=True):
     if AI_TOKEN:
@@ -219,13 +219,24 @@ def call_pure_free_multiverse_ai(messages, is_json=True):
             if res.status_code == 200:
                 raw_content = res.json()['choices'][0]['message']['content'].strip()
                 if is_json:
+                    # 保護機制：去除可能包覆住 JSON 的 Markdown 語法
                     raw_content = re.sub(r'^```json\s*', '', raw_content)
                     raw_content = re.sub(r'\s*```$', '', raw_content).strip()
-                    return json.loads(raw_content)
+                    try:
+                        return json.loads(raw_content)
+                    except json.JSONDecodeError as e:
+                        st.error(f"⚠️ AI 返回的內容格式不正確無法解析：{e}")
+                        return None
                 return raw_content
+            else:
+                st.error(f"⚠️ AI 伺服器拒絕請求 (代碼 {res.status_code}): {res.text}")
+                return None
         except Exception as e:
-            pass
-    return None
+            st.error(f"⚠️ 網絡連線超時或發生不可預期錯誤: {str(e)}")
+            return None
+    else:
+        st.error("❌ 找不到 AI_TOKEN，無法呼叫 AI，請檢查 Secrets 設定。")
+        return None
 
 # ==========================================
 # 🎨 🛠️ 幾何圖形 SVG 動態渲染器 🛠️ 🎨
@@ -473,7 +484,6 @@ with tab_exam:
         else:
             selected_kb = st.selectbox("📂 選擇你要對接的知識庫資料：", available_kbs, key="tab1_kb_selector")
             if selected_kb:
-                # 🛡️ 快取保護機制：只有在真正轉換知識庫時，才向 GitHub 請求大檔案
                 if selected_kb != st.session_state['tab1_loaded_kb_name']:
                     tab1_loading_box = st.empty()
                     kb_data = get_knowledge_base_content(selected_kb, status_ui=tab1_loading_box)
@@ -553,15 +563,33 @@ with tab_exam:
             task_step = 1.0 / len(tasks) if tasks else 1.0
             
             for idx, (t_title, t_num) in enumerate(tasks):
+                # 🌟 加入 JSON 緊箍咒：強制 GPT 輸出指定 Key，解決一片空白的死穴
                 sub_prompt = f"""你是一位香港名校【{subject}科】主任。請為【香港小學{grade}】編寫【{subject}科】測驗卷的【{t_title}】。
                 本次出題範圍與已提煉的知識庫考點為：「{final_vault_text}」
                 要求寫出全部 {t_num} 題，不准使用省略號。
                 {geo_rule}
+                
+                ⚠️ 【極度重要：JSON 輸出格式要求】
+                你必須以 JSON 格式 (JSON Object) 輸出，且必須包含以下兩個明確的 Key（不要隨便發明或更改 Key 名稱）：
+                1. "exam_body" : 這裡放所有供學生作答的題目內容字串 (包含題號，不含解答)。
+                2. "answer_body" : 這裡放該部分的完整標準答案與詳細解題步驟字串。
                 """
+                
                 res_json = call_pure_free_multiverse_ai([{"role": "user", "content": sub_prompt}], is_json=True)
+                
                 if res_json:
-                    combined_exam += ensure_flat_string(res_json.get("exam_body", "")) + "\n\n"
-                    combined_ans += ensure_flat_string(res_json.get("answer_body", "")) + "\n\n"
+                    exam_text = res_json.get("exam_body", "")
+                    ans_text = res_json.get("answer_body", "")
+                    
+                    if not exam_text and not ans_text:
+                        # 萬一 AI 仍然唔聽話改咗名，都會寫低錯誤提醒你，唔會再玩失蹤
+                        combined_exam += f"\n\n⚠️ 【系統警告】{t_title} 生成失敗，AI 違反了 JSON 格式約定，請重新呼叫引擎。\n\n"
+                    else:
+                        combined_exam += ensure_flat_string(exam_text) + "\n\n"
+                        combined_ans += ensure_flat_string(ans_text) + "\n\n"
+                else:
+                    combined_exam += f"\n\n⚠️ 【系統警告】網絡連線超時或 {t_title} 生成失敗，請再試一次。\n\n"
+                    
                 progress_bar.progress((idx + 1) * task_step)
 
             st.session_state['generated_exam'] = combined_exam
@@ -642,7 +670,6 @@ with tab_exam:
 with tab_kb:
     st.header("📂 雲端課文/作業/工作紙知識庫管理")
     
-    # 頂部控制欄：操作模式切換與全域重置
     col_mode, col_reset = st.columns([3, 1])
     with col_mode:
         if 'prev_action' not in st.session_state: st.session_state['prev_action'] = "🆕 建立全新知識庫"
@@ -685,7 +712,6 @@ with tab_kb:
                         st.session_state['working_kb_name'] = selected_edit_kb
                         st.success(f"🎉 已成功秒速載入最新版「{selected_edit_kb}」！現在你可以追加或刪減檔案。")
                         
-                        # 🔄 同步更新 TAB 1 的預覽快取，確保兩邊數據一致
                         st.session_state['tab1_loaded_kb_images'] = st.session_state['working_images']
                         st.session_state['tab1_loaded_kb_name'] = selected_edit_kb
                         
@@ -698,7 +724,6 @@ with tab_kb:
                         loading_status_box.info("⏳ 正在由 GitHub 徹底刪除知識庫...")
                         if delete_knowledge_base_from_github(selected_edit_kb):
                             st.success(f"🔥 雲端知識庫「{selected_edit_kb}」已徹底抹除！")
-                            # 🔄 同步清除 TAB 1 快取
                             if st.session_state['tab1_loaded_kb_name'] == selected_edit_kb:
                                 st.session_state['tab1_loaded_kb_name'] = ""
                                 st.session_state['tab1_loaded_kb_images'] = []
@@ -713,20 +738,17 @@ with tab_kb:
             else:
                 st.warning("💡 請先選擇上方的知識庫並按下「📥 載入最新版」按鈕。")
 
-    # 🌟 上傳與檔案管理區
     if show_workspace:
         st.write("---")
         st.markdown("### 📥 上傳與檔案管理區")
         
         uploaded_files = st.file_uploader("📸 請選擇或拖放上傳新檔案...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key=f"kb_uploader_{st.session_state['uploader_key_counter']}")
         if uploaded_files:
-            new_added = False
             for f in uploaded_files:
                 b64_str = base64.b64encode(f.read()).decode("utf-8")
                 clean_new_b64 = re.sub(r'\s+', '', b64_str)
                 if clean_new_b64 not in st.session_state['working_images']:
                     st.session_state['working_images'].append(clean_new_b64)
-                    new_added = True
 
         if st.session_state['working_images']:
             st.markdown(f"#### 🔍 檔案預覽與管理（共 {len(st.session_state['working_images'])} 張）")
@@ -755,7 +777,6 @@ with tab_kb:
                     save_status_box.success("🎉 儲存成功！網頁即將洗淨並重置為初始狀態...")
                     st.toast("🎉 雲端知識庫儲存成功！", icon="✅")
                     
-                    # 🔄 儲存後同步更新 TAB 1 的預覽快取
                     st.session_state['tab1_loaded_kb_name'] = st.session_state['working_kb_name'].strip()
                     st.session_state['tab1_loaded_kb_images'] = st.session_state['working_images'].copy()
                     
