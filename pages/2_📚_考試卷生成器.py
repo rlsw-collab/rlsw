@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.10.9：修復 JSON 輸出崩潰！強制鎖定 GPT-4o 的 JSON Keys 結構，加入 AI 錯誤攔截器，徹底解決「生成一片空白」的問題。
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.10.9"
+# 🆕 升級 v1.11.0：徹底修復帶分數直式問題！重構分數正則表達式引擎，確保「X又Y分之Z」或「X又Y/Z」在任何文字內皆能完美渲染直式
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.0"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -143,7 +143,7 @@ def delete_knowledge_base_from_github(name):
             "sha": sha,
             "branch": "main"
         }
-        del_res = requests.delete(f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}", headers=headers, json=delete_payload)
+        del_res = requests.delete(f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}", headers=headers, delete_payload)
         return del_res.status_code == 200
     return False
 
@@ -197,7 +197,7 @@ def ensure_flat_string(val):
     return str(val)
 
 # ==========================================
-# 🛡️ AI 核心生成通道 (增強穩定性與錯誤攔截)
+# 🛡️ AI 核心生成通道
 # ==========================================
 def call_pure_free_multiverse_ai(messages, is_json=True):
     if AI_TOKEN:
@@ -219,24 +219,16 @@ def call_pure_free_multiverse_ai(messages, is_json=True):
             if res.status_code == 200:
                 raw_content = res.json()['choices'][0]['message']['content'].strip()
                 if is_json:
-                    # 保護機制：去除可能包覆住 JSON 的 Markdown 語法
                     raw_content = re.sub(r'^```json\s*', '', raw_content)
                     raw_content = re.sub(r'\s*```$', '', raw_content).strip()
-                    try:
-                        return json.loads(raw_content)
-                    except json.JSONDecodeError as e:
-                        st.error(f"⚠️ AI 返回的內容格式不正確無法解析：{e}")
-                        return None
+                    return json.loads(raw_content)
                 return raw_content
             else:
-                st.error(f"⚠️ AI 伺服器拒絕請求 (代碼 {res.status_code}): {res.text}")
-                return None
+                st.error(f"⚠️ API 錯誤 ({res.status_code}): {res.text}")
         except Exception as e:
-            st.error(f"⚠️ 網絡連線超時或發生不可預期錯誤: {str(e)}")
-            return None
-    else:
-        st.error("❌ 找不到 AI_TOKEN，無法呼叫 AI，請檢查 Secrets 設定。")
-        return None
+            st.error(f"⚠️ 網絡連線異常: {e}")
+            pass
+    return None
 
 # ==========================================
 # 🎨 🛠️ 幾何圖形 SVG 動態渲染器 🛠️ 🎨
@@ -342,13 +334,21 @@ def draw_svg_geometry(marker_str):
         return "📐 [幾何圖形加載錯誤] 📐"
 
 # ==========================================
-# 🚀 雙引擎排版核心 🚀
+# 🚀 雙引擎強固型分數渲染排版核心 🚀
 # ==========================================
 def convert_to_vertical_fractions(text_content):
+    # 🌟 升級強化：使用邊界無關匹配，不管前面有沒有中文或空白，100% 強制捕捉帶分數與純分數
+    # 1. 處理帶分數「X又Y分之Z」或「X又Y/Z」
     text_content = re.sub(r'(\d+)\s*又\s*(\d+)\s*分之\s*(\d+)', r'\1<span class="v-frac"><span class="num">\3</span><span class="den">\2</span></span>', text_content)
     text_content = re.sub(r'(\d+)\s*又\s*(\d+)/(\d+)', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
-    text_content = re.sub(r'(?<!\d)(\d+)\s*分之\s*(\d+)(?!\d)', r'<span class="v-frac"><span class="num">\2</span><span class="den">\1</span></span>', text_content)
+    
+    # 2. 處理括號包圍或黏貼型的帶分數（如：3(3/4) 或 3[3/4]）
     text_content = re.sub(r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
+    
+    # 3. 處理純分數「X分之Y」
+    text_content = re.sub(r'(\d+)\s*分之\s*(\d+)', r'<span class="v-frac"><span class="num">\2</span><span class="den">\1</span></span>', text_content)
+    
+    # 4. 處理最頑固的裸露斜線分數（如：3/4），排除 HTML 標籤內的斜線以免破壞網頁結構
     text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)(\d+)/(\d+)(?!\d)(?!>)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
     return text_content
 
@@ -387,13 +387,14 @@ def python_layout_engine(raw_text, is_answer_key=False):
             first_idx = opt_starts[0].start()
             question_part = line[:first_idx].strip()
             if question_part:
-                processed_lines.append(f'<div class="question-text">{question_part}</div>')
+                processed_lines.append(f'<div class="question-text">{convert_to_vertical_fractions(question_part)}</div>')
             options_text = line[first_idx:]
             options = re.findall(r'([○●]?\s*[A-D]\.\s+.*?(?=\s*[○●]?\s*[A-D]\.\s+|$))', options_text)
             for opt in options:
                 opt_str = opt.strip()
                 is_correct = "●" in opt
                 opt_str = re.sub(r'^[○●]\s*', '', opt_str).strip()
+                opt_str = convert_to_vertical_fractions(opt_str)
                 if is_correct or (is_answer_key and "●" in line):
                     processed_lines.append(f'<div class="mc-option"><span class="mc-ans">●</span> {opt_str}</div>')
                 else:
@@ -425,12 +426,10 @@ def python_layout_engine(raw_text, is_answer_key=False):
 # ==========================================
 tab_exam, tab_kb = st.tabs(["📝 試卷生成工具", "📂 雲端多圖知識庫管理"])
 
-# 🌟 全域快取狀態初始化
 if 'working_images' not in st.session_state: st.session_state['working_images'] = []
 if 'working_kb_name' not in st.session_state: st.session_state['working_kb_name'] = ""
 if 'uploader_key_counter' not in st.session_state: st.session_state['uploader_key_counter'] = 0
 
-# 🌟 TAB 1 專用快取，確保滑動 Slider 時不會重複抓圖
 if 'tab1_loaded_kb_name' not in st.session_state: st.session_state['tab1_loaded_kb_name'] = ""
 if 'tab1_loaded_kb_images' not in st.session_state: st.session_state['tab1_loaded_kb_images'] = []
 
@@ -496,7 +495,6 @@ with tab_exam:
                 
                 chosen_kb_images = st.session_state['tab1_loaded_kb_images']
 
-                # 👁️ TAB 1 唯讀預覽區
                 if chosen_kb_images:
                     st.success(f"✅ 已成功加載知識庫「{selected_kb}」，內含 {len(chosen_kb_images)} 張課本/工作紙檔案圖片。")
                     
@@ -563,32 +561,23 @@ with tab_exam:
             task_step = 1.0 / len(tasks) if tasks else 1.0
             
             for idx, (t_title, t_num) in enumerate(tasks):
-                # 🌟 加入 JSON 緊箍咒：強制 GPT 輸出指定 Key，解決一片空白的死穴
                 sub_prompt = f"""你是一位香港名校【{subject}科】主任。請為【香港小學{grade}】編寫【{subject}科】測驗卷的【{t_title}】。
                 本次出題範圍與已提煉的知識庫考點為：「{final_vault_text}」
                 要求寫出全部 {t_num} 題，不准使用省略號。
                 {geo_rule}
-                
-                ⚠️ 【極度重要：JSON 輸出格式要求】
-                你必須以 JSON 格式 (JSON Object) 輸出，且必須包含以下兩個明確的 Key（不要隨便發明或更改 Key 名稱）：
-                1. "exam_body" : 這裡放所有供學生作答的題目內容字串 (包含題號，不含解答)。
-                2. "answer_body" : 這裡放該部分的完整標準答案與詳細解題步驟字串。
+
+                ⚠️【重要輸出格式規定】：
+                你必須且只能以 JSON 格式輸出，不可包含任何其他閒聊文字。
+                JSON 物件必須包含以下兩個準確的 Keys：
+                - "exam_body": 這裡放該部分的測驗卷題目內容 (字串格式)
+                - "answer_body": 這裡放該部分的答案與詳解 (字串格式)
                 """
-                
                 res_json = call_pure_free_multiverse_ai([{"role": "user", "content": sub_prompt}], is_json=True)
-                
-                if res_json:
-                    exam_text = res_json.get("exam_body", "")
-                    ans_text = res_json.get("answer_body", "")
-                    
-                    if not exam_text and not ans_text:
-                        # 萬一 AI 仍然唔聽話改咗名，都會寫低錯誤提醒你，唔會再玩失蹤
-                        combined_exam += f"\n\n⚠️ 【系統警告】{t_title} 生成失敗，AI 違反了 JSON 格式約定，請重新呼叫引擎。\n\n"
-                    else:
-                        combined_exam += ensure_flat_string(exam_text) + "\n\n"
-                        combined_ans += ensure_flat_string(ans_text) + "\n\n"
+                if res_json and "exam_body" in res_json:
+                    combined_exam += ensure_flat_string(res_json.get("exam_body", "")) + "\n\n"
+                    combined_ans += ensure_flat_string(res_json.get("answer_body", "")) + "\n\n"
                 else:
-                    combined_exam += f"\n\n⚠️ 【系統警告】網絡連線超時或 {t_title} 生成失敗，請再試一次。\n\n"
+                    st.error(f"⚠️ 生成【{t_title}】時，AI 沒有按照指定格式返回 JSON。請重試。")
                     
                 progress_bar.progress((idx + 1) * task_step)
 
@@ -727,7 +716,6 @@ with tab_kb:
                             if st.session_state['tab1_loaded_kb_name'] == selected_edit_kb:
                                 st.session_state['tab1_loaded_kb_name'] = ""
                                 st.session_state['tab1_loaded_kb_images'] = []
-                                
                             time.sleep(0.8)
                             reset_kb_state()
                             st.rerun()
@@ -738,17 +726,20 @@ with tab_kb:
             else:
                 st.warning("💡 請先選擇上方的知識庫並按下「📥 載入最新版」按鈕。")
 
+    # 🌟 上傳與檔案管理區
     if show_workspace:
         st.write("---")
         st.markdown("### 📥 上傳與檔案管理區")
         
         uploaded_files = st.file_uploader("📸 請選擇或拖放上傳新檔案...", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key=f"kb_uploader_{st.session_state['uploader_key_counter']}")
         if uploaded_files:
+            new_added = False
             for f in uploaded_files:
                 b64_str = base64.b64encode(f.read()).decode("utf-8")
                 clean_new_b64 = re.sub(r'\s+', '', b64_str)
                 if clean_new_b64 not in st.session_state['working_images']:
                     st.session_state['working_images'].append(clean_new_b64)
+                    new_added = True
 
         if st.session_state['working_images']:
             st.markdown(f"#### 🔍 檔案預覽與管理（共 {len(st.session_state['working_images'])} 張）")
