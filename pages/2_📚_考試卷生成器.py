@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.11.6：極致無暇修復版！徹底洗淨儲存區不小心殘留的「any」字元筆誤，100% 通過 Python 語法嚴格測試！
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.6"
+# 🆕 升級 v1.11.7：印刷詳解完美版！徹底修正離體分數正則表達式，嚴格封鎖加減號（+、-）跌入分母的 HTML 排版 BUG！
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.7"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -338,16 +338,24 @@ def draw_svg_geometry(marker_str):
 # ==========================================
 def convert_to_vertical_fractions(text_content):
     if not text_content: return ""
+    # 1. 洗淨 LaTeX 數學符號殘留與特殊運算子
     text_content = re.sub(r'\\\(\s*\\frac\{\s*([^}]+)\s*\}\{\s*([^}]+)\s*\}\s*\\\)', r'\1/\2', text_content)
     text_content = re.sub(r'\\frac\{\s*([^}]+)\s*\}\{\s*([^}]+)\s*\}', r'\1/\2', text_content)
     text_content = text_content.replace(r'\times', ' × ').replace(r'\div', ' ÷ ')
     text_content = text_content.replace(r'\(', ' ').replace(r'\)', ' ')
 
+    # 2. 處理帶分數「X又Y分之Z」或「X又Y/Z」
     text_content = re.sub(r'(\d+)\s*又\s*(\d+)\s*分之\s*(\d+)', r'\1<span class="v-frac"><span class="num">\3</span><span class="den">\2</span></span>', text_content)
     text_content = re.sub(r'(\d+)\s*又\s*(\d+)/(\d+)', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
     text_content = re.sub(r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
+    
+    # 3. 處理純分數「X分之Y」
     text_content = re.sub(r'(\d+)\s*分之\s*(\d+)', r'<span class="v-frac"><span class="num">\2</span><span class="den">\1</span></span>', text_content)
-    text_content = re.sub(r'(?<!\d)(\d+)\s+([\d\+\-]+)(?!\d)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
+    
+    # 🌟 4. 完美修正點：嚴格捕捉純數字離體分數（例如 "3 5"），徹底杜絕加減號（+、-）混入分子分母
+    text_content = re.sub(r'(?<!\d)(?<![><=\-\+])(\d+)\s+(\d+)(?!\d)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
+
+    # 5. 處理所有標準斜線分數（如：3/5 或 12/15）
     text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)([\d\+\-]+)/([\d\+\-]+)(?!\d)(?!>)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
     return text_content
 
@@ -401,7 +409,8 @@ def python_layout_engine(raw_text, is_answer_key=False):
                     processed_lines.append(f'<div class="mc-option"><span class="mc-circle">○</span> {opt_str}</div>')
             continue
 
-        if is_answer_key and (clean_line.startswith("詳解：") or re.match(r'^\d+\.', clean_line) or clean_line.startswith("答案是")):
+        # 答案與詳解頁強固渲染通道
+        if is_answer_key and (clean_line.startswith("詳解：") or re.match(r'^\d+\.', clean_line) or clean_line.startswith("答案是") or clean_line.startswith("答案：")):
             line = convert_to_vertical_fractions(line)
             processed_lines.append(f'<div style="margin-bottom:8px; line-height:2.5;">{line}</div>')
             continue
@@ -572,7 +581,7 @@ with tab_exam:
                 {geo_rule}
 
                 ⚠️【重要輸出格式規定】：
-                你必須且只能以 JSON 格式輸出，不可包含 any 其他閒聊文字。
+                你必須且只能以 JSON 格式輸出，不可包含任何其他閒聊文字。
                 JSON 物件必須包含以下兩個準確的 Keys：
                 - "exam_body": 這裡放該部分的測驗卷題目內容 (字串格式)
                 - "answer_body": 這裡放該部分的答案與詳解 (字串格式)
