@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.11.1：語法嚴格修復版！徹底剷除結尾多餘的反引號字元，完美修復 Streamlit ast.parse 崩潰引發的 SyntaxError
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.1"
+# 🆕 升級 v1.11.2：清純修復版！徹底拔除第 198 行不小心夾帶的「abatement」雜質字，完美恢復 ast.parse 載入引擎
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.2"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -259,7 +259,7 @@ def draw_svg_geometry(marker_str):
                 <line x1="45" y1="75" x2="205" y2="75" stroke="black" stroke-width="1" stroke-dasharray="4" />
                 <circle cx="45" cy="75" r="2.5" fill="black"/><text x="40" y="95" font-size="13" font-family="sans-serif">P</text>
                 <circle cx="85" cy="75" r="2.5" fill="black"/><text x="80" y="95" font-size="13" font-family="sans-serif">Q</text>
-                <circle cx="180" cy="2.5" r="2.5" fill="black"/><text x="175" y="95" font-size="13" font-family="sans-serif">R</text>
+                <circle cx="180" cy="75" r="2.5" fill="black"/><text x="175" y="95" font-size="13" font-family="sans-serif">R</text>
                 <text x="50" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑/Radius {r1}</text>
                 <text x="165" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑/Radius {r3}</text>
             </svg>
@@ -387,7 +387,7 @@ def python_layout_engine(raw_text, is_answer_key=False):
                 is_correct = "●" in opt
                 opt_str = re.sub(r'^[○●]\s*', '', opt_str).strip()
                 opt_str = convert_to_vertical_fractions(opt_str)
-                if is_correct or (is_answer_key abatement and "●" in line):
+                if is_correct or (is_answer_key and "●" in line):
                     processed_lines.append(f'<div class="mc-option"><span class="mc-ans">●</span> {opt_str}</div>')
                 else:
                     processed_lines.append(f'<div class="mc-option"><span class="mc-circle">○</span> {opt_str}</div>')
@@ -738,7 +738,7 @@ with tab_kb:
             cols = st.columns(4)
             for i, b64_data in enumerate(st.session_state['working_images']):
                 with cols[i % 4]:
-                    clean_src = b64_data if b64_data.startswith("data:image") else f"data:image/jpeg;base64,{b64_data}"
+                    clean_src = b64_data if b64_data.startswith("data:image") else f"data:image/jpeg;base64,{clean_b64_data}"
                     st.image(clean_src, use_container_width=True)
                     if st.button("❌ 刪除", key=f"del_img_btn_{i}"):
                         st.session_state['working_images'].pop(i)
@@ -751,7 +751,7 @@ with tab_kb:
             if not st.session_state['working_kb_name'].strip():
                 st.error("❌ 請確認知識庫名稱不為空！")
             elif not st.session_state['working_images']:
-                st.error("❌ 知識庫內不能沒有任何有效檔案！")
+                st.error("❌ 知識庫內不能沒有 any 有效檔案！")
             else:
                 save_status_box.info("🚀 開始啟動儲存程序，請稍候...")
                 success = upload_knowledge_base_to_github(st.session_state['working_kb_name'].strip(), st.session_state['working_images'], status_ui=save_status_box)
