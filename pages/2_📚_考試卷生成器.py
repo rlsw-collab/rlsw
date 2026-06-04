@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.11.3：全面強固版！完美修復 requests.delete 遺漏 json= 的致命語法錯誤，並全自動兼容 AI 生成的 LaTeX \frac{A}{B} 直式分數排版！
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.3"
+# 🆕 升級 v1.11.4：印刷級詳解修復版！完美洗淨答案頁中的 LaTeX 語法殘留，全面支援詳解區分數直式化與數學運算子（×、÷）美化！
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.4"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -143,7 +143,6 @@ def delete_knowledge_base_from_github(name):
             "sha": sha,
             "branch": "main"
         }
-        # 🌟 語法完美修復：補回 json= 修正位置錯亂問題
         del_res = requests.delete(f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}", headers=headers, json=delete_payload)
         return del_res.status_code == 200
     return False
@@ -335,26 +334,31 @@ def draw_svg_geometry(marker_str):
         return "📐 [幾何圖形加載錯誤] 📐"
 
 # ==========================================
-# 🚀 雙引擎強固型分數渲染排版核心 🚀
+# 🚀 雙引擎強固型分數與數學符號排版核心 🚀
 # ==========================================
 def convert_to_vertical_fractions(text_content):
-    # 🌟 升級擴展：先行剔除 LaTeX 分數標記 `\frac{A}{B}` 與 `\(` `\)` 以免干擾直式渲染
-    text_content = re.sub(r'\\\(\s*\\frac\{\s*(\d+)\s*\}\{\s*(\d+)\s*\}\s*\\\)', r'\1/\2', text_content)
-    text_content = re.sub(r'\\frac\{\s*(\d+)\s*\}\{\s*(\d+)\s*\}', r'\1/\2', text_content)
-    text_content = text_content.replace(r'\(', '').replace(r'\)', '')
+    if not text_content: return ""
+    # 🌟 核心升級：徹底洗淨 LaTeX 數學符號殘留與特殊運算子
+    text_content = re.sub(r'\\\(\s*\\frac\{\s*([^}]+)\s*\}\{\s*([^}]+)\s*\}\s*\\\)', r'\1/\2', text_content)
+    text_content = re.sub(r'\\frac\{\s*([^}]+)\s*\}\{\s*([^}]+)\s*\}', r'\1/\2', text_content)
+    text_content = text_content.replace(r'\times', ' × ').replace(r'\div', ' ÷ ')
+    text_content = text_content.replace(r'\(', ' ').replace(r'\)', ' ')
 
     # 1. 處理帶分數「X又Y分之Z」或「X又Y/Z」
     text_content = re.sub(r'(\d+)\s*又\s*(\d+)\s*分之\s*(\d+)', r'\1<span class="v-frac"><span class="num">\3</span><span class="den">\2</span></span>', text_content)
     text_content = re.sub(r'(\d+)\s*又\s*(\d+)/(\d+)', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
     
-    # 2. 處理括號包圍或黏貼型的帶分數（如：3(3/4) 或 3[3/4]）
+    # 2. 處理括號或離體帶分數
     text_content = re.sub(r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
     
     # 3. 處理純分數「X分之Y」
     text_content = re.sub(r'(\d+)\s*分之\s*(\d+)', r'<span class="v-frac"><span class="num">\2</span><span class="den">\1</span></span>', text_content)
     
-    # 4. 處理裸露斜線分數（如：3/4），排除 HTML 標籤內部的斜線
-    text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)(\d+)/(\d+)(?!\d)(?!>)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
+    # 4. 捕捉因為換行或空格被拆散的「離體分數」（例如 "3 5" 中間夾雜空格）
+    text_content = re.sub(r'(?<!\d)(\d+)\s+([\d\+\-]+)(?!\d)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
+
+    # 5. 處理所有裸露的標準斜線分數（如：3/5 或 (3+2)/5）
+    text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)([\d\+\-]+)/([\d\+\-]+)(?!\d)(?!>)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
     return text_content
 
 def python_layout_engine(raw_text, is_answer_key=False):
@@ -368,11 +372,12 @@ def python_layout_engine(raw_text, is_answer_key=False):
     for line in lines:
         if not line.strip(): continue
         clean_line = line.strip()
+        
         if any(s in clean_line for s in ["部：", "部分：", "部", "部分", "Section:", "Part:"]):
             current_section = clean_line
             processed_lines.append(f'<div class="exam-section-header">{clean_line}</div>')
             continue
-        if any(s in clean_line for s in ["測驗", "考試", "試卷", "Quiz", "Test", "Exam"]) and len(clean_line) < 45:
+        if any(s in clean_line for s in ["測驗", "考試", "試卷", "Quiz", "Test", "Exam", "Answer Key", "🔑"]) and len(clean_line) < 45:
             processed_lines.append(f'<div class="exam-title-main">{clean_line}</div>')
             continue
         if any(s in clean_line for s in ["班級", "姓名", "學號", "班別", "Class", "Name", "No."]):
@@ -404,6 +409,12 @@ def python_layout_engine(raw_text, is_answer_key=False):
                     processed_lines.append(f'<div class="mc-option"><span class="mc-ans">●</span> {opt_str}</div>')
                 else:
                     processed_lines.append(f'<div class="mc-option"><span class="mc-circle">○</span> {opt_str}</div>')
+            continue
+
+        # 🌟 答案與詳解頁專用渲染強固通道
+        if is_answer_key and (clean_line.startswith("詳解：") or re.match(r'^\d+\.', clean_line) or clean_line.startswith("答案是")):
+            line = convert_to_vertical_fractions(line)
+            processed_lines.append(f'<div style="margin-bottom:8px; line-height:2.5;">{line}</div>')
             continue
 
         line = re.sub(r'([_＿]{2,})', r'<span class="fill-blank-underline"></span>', line)
@@ -474,7 +485,7 @@ with tab_exam:
     final_vault_text = ""
     chosen_kb_images = []
     
-    if scope_mode == "在此修改或輸入幾何範圍核心概念：":
+    if scope_mode == "在此修改或輸入幾幾何範圍核心概念：":
         text_input_val = st.text_area("✍️ 請輸入核心概念或課文範圍：", value=current_vault_ocr, height=150, key="ocr_box_editor")
         if text_input_val != current_vault_ocr:
             write_to_exam_vault(text_input_val)
@@ -545,7 +556,7 @@ with tab_exam:
             geo_rule = ""
             if has_geometry:
                 geo_rule = f"""
-                ⚠️【核心幾何命令】：考量到本次範圍涉及幾何，你必須在題目中穿插嵌入幾幾何圖形標記。
+                ⚠️【核心幾何命令】：考量到本次範圍涉及幾何，你必須在題目中穿插嵌入幾何圖形標記。
                 - [GEOMETRIC:three_circles_linear:r1=大圓半徑;r2=中圓半徑;r3=小圓半徑]
                 - [GEOMETRIC:circles_in_rectangle:w=長方形長;h=長方形闊]
                 - [GEOMETRIC:concentric_overlap:d1=大圓直徑]
@@ -572,7 +583,7 @@ with tab_exam:
                 {geo_rule}
 
                 ⚠️【重要輸出格式規定】：
-                你必須且只能以 JSON 格式輸出，不可包含任何其他閒聊文字。
+                你必須且只能以 JSON 格式輸出，不可包含 any 其他閒聊文字。
                 JSON 物件必須包含以下兩個準確的 Keys：
                 - "exam_body": 這裡放該部分的測驗卷題目內容 (字串格式)
                 - "answer_body": 這裡放該部分的答案與詳解 (字串格式)
