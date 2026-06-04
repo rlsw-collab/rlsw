@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.11.0：徹底修復帶分數直式問題！重構分數正則表達式引擎，確保「X又Y分之Z」或「X又Y/Z」在任何文字內皆能完美渲染直式
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.0"
+# 🆕 升級 v1.11.1：語法嚴格修復版！徹底剷除結尾多餘的反引號字元，完美修復 Streamlit ast.parse 崩潰引發的 SyntaxError
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.1"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -143,7 +143,7 @@ def delete_knowledge_base_from_github(name):
             "sha": sha,
             "branch": "main"
         }
-        del_res = requests.delete(f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}", headers=headers, delete_payload)
+        del_res = requests.delete(f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}", headers=headers, json=delete_payload)
         return del_res.status_code == 200
     return False
 
@@ -259,7 +259,7 @@ def draw_svg_geometry(marker_str):
                 <line x1="45" y1="75" x2="205" y2="75" stroke="black" stroke-width="1" stroke-dasharray="4" />
                 <circle cx="45" cy="75" r="2.5" fill="black"/><text x="40" y="95" font-size="13" font-family="sans-serif">P</text>
                 <circle cx="85" cy="75" r="2.5" fill="black"/><text x="80" y="95" font-size="13" font-family="sans-serif">Q</text>
-                <circle cx="180" cy="75" r="2.5" fill="black"/><text x="175" y="95" font-size="13" font-family="sans-serif">R</text>
+                <circle cx="180" cy="2.5" r="2.5" fill="black"/><text x="175" y="95" font-size="13" font-family="sans-serif">R</text>
                 <text x="50" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑/Radius {r1}</text>
                 <text x="165" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑/Radius {r3}</text>
             </svg>
@@ -337,18 +337,10 @@ def draw_svg_geometry(marker_str):
 # 🚀 雙引擎強固型分數渲染排版核心 🚀
 # ==========================================
 def convert_to_vertical_fractions(text_content):
-    # 🌟 升級強化：使用邊界無關匹配，不管前面有沒有中文或空白，100% 強制捕捉帶分數與純分數
-    # 1. 處理帶分數「X又Y分之Z」或「X又Y/Z」
     text_content = re.sub(r'(\d+)\s*又\s*(\d+)\s*分之\s*(\d+)', r'\1<span class="v-frac"><span class="num">\3</span><span class="den">\2</span></span>', text_content)
     text_content = re.sub(r'(\d+)\s*又\s*(\d+)/(\d+)', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
-    
-    # 2. 處理括號包圍或黏貼型的帶分數（如：3(3/4) 或 3[3/4]）
     text_content = re.sub(r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
-    
-    # 3. 處理純分數「X分之Y」
     text_content = re.sub(r'(\d+)\s*分之\s*(\d+)', r'<span class="v-frac"><span class="num">\2</span><span class="den">\1</span></span>', text_content)
-    
-    # 4. 處理最頑固的裸露斜線分數（如：3/4），排除 HTML 標籤內的斜線以免破壞網頁結構
     text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)(\d+)/(\d+)(?!\d)(?!>)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
     return text_content
 
@@ -395,7 +387,7 @@ def python_layout_engine(raw_text, is_answer_key=False):
                 is_correct = "●" in opt
                 opt_str = re.sub(r'^[○●]\s*', '', opt_str).strip()
                 opt_str = convert_to_vertical_fractions(opt_str)
-                if is_correct or (is_answer_key and "●" in line):
+                if is_correct or (is_answer_key abatement and "●" in line):
                     processed_lines.append(f'<div class="mc-option"><span class="mc-ans">●</span> {opt_str}</div>')
                 else:
                     processed_lines.append(f'<div class="mc-option"><span class="mc-circle">○</span> {opt_str}</div>')
