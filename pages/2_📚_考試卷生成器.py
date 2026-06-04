@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.11.7：印刷詳解完美版！徹底修正離體分數正則表達式，嚴格封鎖加減號（+、-）跌入分母的 HTML 排版 BUG！
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.7"
+# 🆕 升級 v1.11.8：印刷排版完美進化！重構計算題與文字題排版引擎，支援多行題目資料與內文完整黏合，確保四行答題線 100% 精準生成在題目最底部！
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.8"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -338,24 +338,16 @@ def draw_svg_geometry(marker_str):
 # ==========================================
 def convert_to_vertical_fractions(text_content):
     if not text_content: return ""
-    # 1. 洗淨 LaTeX 數學符號殘留與特殊運算子
     text_content = re.sub(r'\\\(\s*\\frac\{\s*([^}]+)\s*\}\{\s*([^}]+)\s*\}\s*\\\)', r'\1/\2', text_content)
     text_content = re.sub(r'\\frac\{\s*([^}]+)\s*\}\{\s*([^}]+)\s*\}', r'\1/\2', text_content)
     text_content = text_content.replace(r'\times', ' × ').replace(r'\div', ' ÷ ')
     text_content = text_content.replace(r'\(', ' ').replace(r'\)', ' ')
 
-    # 2. 處理帶分數「X又Y分之Z」或「X又Y/Z」
     text_content = re.sub(r'(\d+)\s*又\s*(\d+)\s*分之\s*(\d+)', r'\1<span class="v-frac"><span class="num">\3</span><span class="den">\2</span></span>', text_content)
     text_content = re.sub(r'(\d+)\s*又\s*(\d+)/(\d+)', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
     text_content = re.sub(r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
-    
-    # 3. 處理純分數「X分之Y」
     text_content = re.sub(r'(\d+)\s*分之\s*(\d+)', r'<span class="v-frac"><span class="num">\2</span><span class="den">\1</span></span>', text_content)
-    
-    # 🌟 4. 完美修正點：嚴格捕捉純數字離體分數（例如 "3 5"），徹底杜絕加減號（+、-）混入分子分母
     text_content = re.sub(r'(?<!\d)(?<![><=\-\+])(\d+)\s+(\d+)(?!\d)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
-
-    # 5. 處理所有標準斜線分數（如：3/5 或 12/15）
     text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)([\d\+\-]+)/([\d\+\-]+)(?!\d)(?!>)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
     return text_content
 
@@ -367,31 +359,56 @@ def python_layout_engine(raw_text, is_answer_key=False):
     processed_lines = []
     current_section = ""
     
+    # 🌟 緩存機制：用於將長題目的資料、幾何圖形跟問題內文全部組合完畢，再統一放答題線
+    buffered_question_lines = []
+    in_applied_section = False
+
+    def flush_question_buffer():
+        if not buffered_question_lines: return
+        # 將題目緩存輸出
+        processed_lines.append(f'<div class="question-text">{"".join(buffered_question_lines)}</div>')
+        # 🌟 完美排版：只有在非答案頁（學生卷）時，才在整個題目區塊最底部放上4行答題線
+        if not is_answer_key:
+            processed_lines.append('<div class="write-zone">' + '<div class="row-line"></div>'*4 + '</div>')
+        buffered_question_lines.clear()
+
     for line in lines:
         if not line.strip(): continue
         clean_line = line.strip()
         
         if any(s in clean_line for s in ["部：", "部分：", "部", "部分", "Section:", "Part:"]):
+            flush_question_buffer() # 跨區前先清空舊緩存
             current_section = clean_line
+            in_applied_section = any(s in current_section for s in ["第三", "第四", "計算", "應用題", "文字題", "長題目", "Calculation", "Word", "Long Questions"])
             processed_lines.append(f'<div class="exam-section-header">{clean_line}</div>')
             continue
+            
         if any(s in clean_line for s in ["測驗", "考試", "試卷", "Quiz", "Test", "Exam", "Answer Key", "🔑"]) and len(clean_line) < 45:
+            flush_question_buffer()
             processed_lines.append(f'<div class="exam-title-main">{clean_line}</div>')
             continue
+            
         if any(s in clean_line for s in ["班級", "姓名", "學號", "班別", "Class", "Name", "No."]):
+            flush_question_buffer()
             processed_lines.append(f'<div class="exam-user-info">{clean_line}</div>')
             continue
-            
+
+        # 幾何SVG解析
         geo_match = re.search(r'(\[GEOMETRIC:[^\]]+\])', line)
         if geo_match:
             full_marker = geo_match.group(1)
             svg_html = draw_svg_geometry(full_marker)
-            line = line.replace(full_marker, svg_html)
-            processed_lines.append(f'<div>{line}</div>')
+            line_html = line.replace(full_marker, svg_html)
+            if in_applied_section:
+                buffered_question_lines.append(f'<div>{line_html}</div>')
+            else:
+                processed_lines.append(f'<div>{line_html}</div>')
             continue
 
+        # 多項選擇題
         opt_starts = list(re.finditer(r'[○●]?\s*[A-D]\.\s+', line))
         if opt_starts:
+            flush_question_buffer()
             first_idx = opt_starts[0].start()
             question_part = line[:first_idx].strip()
             if question_part:
@@ -409,12 +426,25 @@ def python_layout_engine(raw_text, is_answer_key=False):
                     processed_lines.append(f'<div class="mc-option"><span class="mc-circle">○</span> {opt_str}</div>')
             continue
 
-        # 答案與詳解頁強固渲染通道
+        # 答案詳解模式直接渲染
         if is_answer_key and (clean_line.startswith("詳解：") or re.match(r'^\d+\.', clean_line) or clean_line.startswith("答案是") or clean_line.startswith("答案：")):
+            flush_question_buffer()
             line = convert_to_vertical_fractions(line)
             processed_lines.append(f'<div style="margin-bottom:8px; line-height:2.5;">{line}</div>')
             continue
 
+        # 🌟 核心修正點：如果是在計算題或文字應用題部分
+        if in_applied_section:
+            # 如果這一行是新題目數字開頭（例如：2. 或者是 二.），就把舊的題目打包、放答題線，然後開始新一題
+            if re.match(r'^\d+\.', clean_line) or re.match(r'^[一二三四五六七八九十]+\.', clean_line):
+                flush_question_buffer()
+            
+            line = re.sub(r'([_＿]{2,})', r'<span class="fill-blank-underline"></span>', line)
+            line = convert_to_vertical_fractions(line)
+            buffered_question_lines.append(f'<div>{line}</div>')
+            continue
+
+        # 普通文字、填充題
         line = re.sub(r'([_＿]{2,})', r'<span class="fill-blank-underline"></span>', line)
         line = re.sub(r'([\(（])\s{2,}([\)）])', r'\1 <span class="fill-blank-underline"></span> \2', line)
         line = convert_to_vertical_fractions(line)
@@ -425,14 +455,10 @@ def python_layout_engine(raw_text, is_answer_key=False):
                 if '<span class="fill-blank-underline">' not in line:
                     line = f'{line} <span class="fill-blank-underline"></span>'
 
-        is_applied_or_calc_section = any(s in current_section for s in ["第三", "第四", "計算", "應用題", "文字題", "長題目", "Calculation", "Word", "Long Questions"])
-        if re.match(r'^\d+\.', clean_line) and not is_answer_key and is_applied_or_calc_section:
-            processed_lines.append(f'<div class="question-text">{line}</div>')
-            processed_lines.append('<div class="write-zone">' + '<div class="row-line"></div>'*4 + '</div>')
-            continue
-
         processed_lines.append(f'<div>{line}</div>')
         
+    # 結尾收尾：清空最後剩餘的緩存題目與答題線
+    flush_question_buffer()
     return "\n".join(processed_lines)
 
 # ==========================================
@@ -581,7 +607,7 @@ with tab_exam:
                 {geo_rule}
 
                 ⚠️【重要輸出格式規定】：
-                你必須且只能以 JSON 格式輸出，不可包含任何其他閒聊文字。
+                你必須且只能以 JSON 格式輸出，不可包含 any 其他閒聊文字。
                 JSON 物件必須包含以下兩個準確的 Keys：
                 - "exam_body": 這裡放該部分的測驗卷題目內容 (字串格式)
                 - "answer_body": 這裡放該部分的答案與詳解 (字串格式)
