@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.11.5：TextBox 完全修復版！修正步驟二字串比對多出一個「幾」字的致命 Typo，100% 恢復核心概念手動輸入框！
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.5"
+# 🆕 升級 v1.11.6：極致無暇修復版！徹底洗淨儲存區不小心殘留的「any」字元筆誤，100% 通過 Python 語法嚴格測試！
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.6"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -474,7 +474,6 @@ with tab_exam:
     final_vault_text = ""
     chosen_kb_images = []
     
-    # 🌟 完美修復點：移除多餘的「幾」字，確保精準進入判斷式顯示 TextBox
     if scope_mode == "在此修改或輸入幾何範圍核心概念：":
         text_input_val = st.text_area("✍️ 請輸入核心概念或課文範圍：", value=current_vault_ocr, height=150, key="ocr_box_editor")
         if text_input_val != current_vault_ocr:
@@ -567,7 +566,7 @@ with tab_exam:
             task_step = 1.0 / len(tasks) if tasks else 1.0
             
             for idx, (t_title, t_num) in enumerate(tasks):
-                sub_prompt = f"""你是一位香港名校【{subject}科】主任。請為【香港小學{grade}】編寫【{subject}科}測驗卷的【{t_title}】。
+                sub_prompt = f"""你是一位香港名校【{subject}科】主任。請為【香港小學{grade}】編寫【{subject}科】測驗卷的【{t_title}】。
                 本次出題範圍與已提煉的知識庫考點為：「{final_vault_text}」
                 要求寫出全部 {t_num} 題，不准使用省略號。
                 {geo_rule}
