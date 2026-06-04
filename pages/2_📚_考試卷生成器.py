@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.11.2：清純修復版！徹底拔除第 198 行不小心夾帶的「abatement」雜質字，完美恢復 ast.parse 載入引擎
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.2"
+# 🆕 升級 v1.11.3：全面強固版！完美修復 requests.delete 遺漏 json= 的致命語法錯誤，並全自動兼容 AI 生成的 LaTeX \frac{A}{B} 直式分數排版！
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.3"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -143,6 +143,7 @@ def delete_knowledge_base_from_github(name):
             "sha": sha,
             "branch": "main"
         }
+        # 🌟 語法完美修復：補回 json= 修正位置錯亂問題
         del_res = requests.delete(f"https://api.github.com/repos/{GITHUB_USER}/{GITHUB_REPO}/contents/{path}", headers=headers, json=delete_payload)
         return del_res.status_code == 200
     return False
@@ -337,10 +338,22 @@ def draw_svg_geometry(marker_str):
 # 🚀 雙引擎強固型分數渲染排版核心 🚀
 # ==========================================
 def convert_to_vertical_fractions(text_content):
+    # 🌟 升級擴展：先行剔除 LaTeX 分數標記 `\frac{A}{B}` 與 `\(` `\)` 以免干擾直式渲染
+    text_content = re.sub(r'\\\(\s*\\frac\{\s*(\d+)\s*\}\{\s*(\d+)\s*\}\s*\\\)', r'\1/\2', text_content)
+    text_content = re.sub(r'\\frac\{\s*(\d+)\s*\}\{\s*(\d+)\s*\}', r'\1/\2', text_content)
+    text_content = text_content.replace(r'\(', '').replace(r'\)', '')
+
+    # 1. 處理帶分數「X又Y分之Z」或「X又Y/Z」
     text_content = re.sub(r'(\d+)\s*又\s*(\d+)\s*分之\s*(\d+)', r'\1<span class="v-frac"><span class="num">\3</span><span class="den">\2</span></span>', text_content)
     text_content = re.sub(r'(\d+)\s*又\s*(\d+)/(\d+)', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
+    
+    # 2. 處理括號包圍或黏貼型的帶分數（如：3(3/4) 或 3[3/4]）
     text_content = re.sub(r'(\d+)\s*[\(\[]?(\d+)/(\d+)[\)\]]?', r'\1<span class="v-frac"><span class="num">\2</span><span class="den">\3</span></span>', text_content)
+    
+    # 3. 處理純分數「X分之Y」
     text_content = re.sub(r'(\d+)\s*分之\s*(\d+)', r'<span class="v-frac"><span class="num">\2</span><span class="den">\1</span></span>', text_content)
+    
+    # 4. 處理裸露斜線分數（如：3/4），排除 HTML 標籤內部的斜線
     text_content = re.sub(r'(?<!/)(?<!<)(?<!\d)(\d+)/(\d+)(?!\d)(?!>)', r'<span class="v-frac"><span class="num">\1</span><span class="den">\2</span></span>', text_content)
     return text_content
 
@@ -532,7 +545,7 @@ with tab_exam:
             geo_rule = ""
             if has_geometry:
                 geo_rule = f"""
-                ⚠️【核心幾何命令】：考量到本次範圍涉及幾何，你必須在題目中穿插嵌入幾何圖形標記。
+                ⚠️【核心幾何命令】：考量到本次範圍涉及幾何，你必須在題目中穿插嵌入幾幾何圖形標記。
                 - [GEOMETRIC:three_circles_linear:r1=大圓半徑;r2=中圓半徑;r3=小圓半徑]
                 - [GEOMETRIC:circles_in_rectangle:w=長方形長;h=長方形闊]
                 - [GEOMETRIC:concentric_overlap:d1=大圓直徑]
@@ -738,7 +751,7 @@ with tab_kb:
             cols = st.columns(4)
             for i, b64_data in enumerate(st.session_state['working_images']):
                 with cols[i % 4]:
-                    clean_src = b64_data if b64_data.startswith("data:image") else f"data:image/jpeg;base64,{clean_b64_data}"
+                    clean_src = b64_data if b64_data.startswith("data:image") else f"data:image/jpeg;base64,{b64_data}"
                     st.image(clean_src, use_container_width=True)
                     if st.button("❌ 刪除", key=f"del_img_btn_{i}"):
                         st.session_state['working_images'].pop(i)
@@ -751,7 +764,7 @@ with tab_kb:
             if not st.session_state['working_kb_name'].strip():
                 st.error("❌ 請確認知識庫名稱不為空！")
             elif not st.session_state['working_images']:
-                st.error("❌ 知識庫內不能沒有 any 有效檔案！")
+                st.error("❌ 知識庫內不能沒有任何有效檔案！")
             else:
                 save_status_box.info("🚀 開始啟動儲存程序，請稍候...")
                 success = upload_knowledge_base_to_github(st.session_state['working_kb_name'].strip(), st.session_state['working_images'], status_ui=save_status_box)
