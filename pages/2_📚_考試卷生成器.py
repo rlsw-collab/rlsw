@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.11.9：幾何大解鎖版！大改出題 Prompt 與底層 SVG 動態渲染器，引導 GPT-4o 根據題目數字自由、動態地灌入幾何參數，實現真正千變萬化的智能出題！
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.9"
+# 🆕 升級 v1.11.10：真・智能解鎖版！徹底重寫幾何 Prompt，嚴禁 AI 機械式循環套用圖形，強制「題目先行、按需配對」，消除無端端夾硬出圓形題的鎖腦 BUG！
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.10"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -231,7 +231,7 @@ def call_pure_free_multiverse_ai(messages, is_json=True):
     return None
 
 # ==========================================
-# 🎨 🛠️ 幾何圖形 SVG 動態渲染器 (全面智能化升級) 🛠️ 🎨
+# 🎨 🛠️ 幾何圖形 SVG 動態渲染器 🛠️ 🎨
 # ==========================================
 def draw_svg_geometry(marker_str):
     try:
@@ -241,7 +241,6 @@ def draw_svg_geometry(marker_str):
         g_type = parts[1].strip()
         param_pairs = parts[2].split(";")
         
-        # 動態解構 AI 填入的數值
         params = {}
         for pair in param_pairs:
             if "=" in pair:
@@ -249,7 +248,6 @@ def draw_svg_geometry(marker_str):
                 params[k.strip().lower()] = v.strip()
                 
         svg_code = ""
-        # 1. 三圓並列或相切 (動態半徑比例與數字)
         if g_type == "three_circles_linear":
             r1 = params.get("r1", "10")
             r3 = params.get("r3", "7")
@@ -263,12 +261,11 @@ def draw_svg_geometry(marker_str):
                 <circle cx="45" cy="75" r="2.5" fill="black"/><text x="40" y="95" font-size="13" font-family="sans-serif">P</text>
                 <circle cx="85" cy="75" r="2.5" fill="black"/><text x="80" y="95" font-size="13" font-family="sans-serif">Q</text>
                 <circle cx="180" cy="75" r="2.5" fill="black"/><text x="175" y="95" font-size="13" font-family="sans-serif">R</text>
-                <text x="50" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑/Radius: {r1}cm</text>
-                <text x="165" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑/Radius: {r3}cm</text>
+                <text x="50" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑: {r1}</text>
+                <text x="165" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑: {r3}</text>
             </svg>
             </div>
             """
-        # 2. 長方形嵌入圓形 (長方形闊會隨住高比例動態拉伸)
         elif g_type == "circles_in_rectangle":
             w_val = params.get("w", "24")
             h_val = params.get("h", "12")
@@ -280,12 +277,11 @@ def draw_svg_geometry(marker_str):
                 <circle cx="170" cy="70" r="48" stroke="black" stroke-width="1.5" fill="none" />
                 <line x1="70" y1="70" x2="118" y2="70" stroke="black" stroke-width="1.2" />
                 <circle cx="70" cy="70" r="2" fill="black" />
-                <text x="110" y="16" font-size="12" font-weight="bold" font-family="sans-serif">長/L = {w_val}</text>
-                <text x="25" y="65" font-size="11" font-family="sans-serif" transform="rotate(-90 25,65)">闊/W = {h_val}</text>
+                <text x="110" y="16" font-size="12" font-weight="bold" font-family="sans-serif">長 = {w_val}</text>
+                <text x="25" y="65" font-size="11" font-family="sans-serif" transform="rotate(-90 25,65)">闊 = {h_val}</text>
             </svg>
             </div>
             """
-        # 3. 大小同心圓重疊
         elif g_type == "concentric_overlap":
             d1 = params.get("d1", "16")
             svg_code = f"""
@@ -301,7 +297,6 @@ def draw_svg_geometry(marker_str):
             </svg>
             </div>
             """
-        # 4. 三角形求底高面積 (動態數字標示)
         elif g_type == "triangle":
             b_val = params.get("b", "15")
             h_val = params.get("h", "10")
@@ -311,12 +306,11 @@ def draw_svg_geometry(marker_str):
                 <polygon points="40,120 200,120 150,30" stroke="black" stroke-width="1.8" fill="none" />
                 <line x1="150" y1="30" x2="150" y2="120" stroke="black" stroke-width="1.2" stroke-dasharray="3" />
                 <rect x="145" y="115" width="5" height="5" stroke="black" stroke-width="1" fill="none" />
-                <text x="100" y="135" font-size="12" font-weight="bold" font-family="sans-serif">底/Base = {b_val}</text>
-                <text x="160" y="80" font-size="12" font-weight="bold" font-family="sans-serif">高/Height = {h_val}</text>
+                <text x="100" y="135" font-size="12" font-weight="bold" font-family="sans-serif">底 = {b_val}</text>
+                <text x="160" y="80" font-size="12" font-weight="bold" font-family="sans-serif">高 = {h_val}</text>
             </svg>
             </div>
             """
-        # 5. 立體長方體求體積
         elif g_type == "cuboid_volume":
             l_val = params.get("l", "12")
             w_val = params.get("w", "8")
@@ -572,24 +566,26 @@ with tab_exam:
                     st.error("❌ 雲端圖片庫深度分析失敗，請檢查網絡通道。")
                     st.stop()
 
-            has_geometry = any(kw in final_vault_text.lower() for kw in ["圓", "三角", "面積", "體積", "長方體", "正方體", "circle", "triangle", "area", "volume", "cuboid"])
+            has_geometry = any(kw in final_vault_text.lower() for kw in ["圓", "三角", "面積", "體積", "長方體", "正方體", "圖形", "長方形", "正方形", "circle", "triangle", "area", "volume", "cuboid"])
             geo_rule = ""
             
-            # 🌟 核心進化：重新編寫 Prompt 命令，徹底解鎖並逼迫 GPT-4o 動態填入他所設計的數值參數
+            # 🌟 核心進化 v1.11.10：重構負面指令與條件觸發邏輯，打破 AI 鎖死循環！
             if has_geometry:
                 geo_rule = f"""
-                ⚠️【幾何圖形智能嵌入核心命令】：
-                由於本次考試範圍涉及幾何，你必須根據你出的題目情境，在適當題目（例如求面積、圓心題目）的下方或中間，嵌入幾何圖形標記。
-                你必須將標記中的數值變數（如 r1, w, h, b, h, l）替換為你該道題目中真實出現的實際數字，不能直接寫文字範例！
-                
-                可用圖形庫與注入規範（請精準根據題目數字動態替換）：
-                - 三圓直線排列：[GEOMETRIC:three_circles_linear:r1=填入大圓半徑數字;r3=填入小圓半徑數字]
-                - 長方形嵌雙圓：[GEOMETRIC:circles_in_rectangle:w=填入長方形長數字;h=填入長方形闊數字]
-                - 同心重疊圓：[GEOMETRIC:concentric_overlap:d1=填入大圓直徑數字]
-                - 三角形底高：[GEOMETRIC:triangle:b=填入底邊數字;h=填入高數字]
-                - 立體長方體：[GEOMETRIC:cuboid_volume:l=填入長數字;w=填入闊數字;h=填入高數字]
-                
-                範例：若你設計的題目是「一個三角形的底是 14cm，高是 9cm」，你必須在該題文字後緊貼輸出：[GEOMETRIC:triangle:b=14;h=9]
+                ⚠️【極致智能幾何圖形標記指令 - 拒絕機械式重複】：
+                作為頂級名校教師，你的首要任務是【根據用戶設定的範圍出題】，而不是盲目套用圖形標記！
+                請遵守以下最嚴格的智能標記規則：
+                1. **題目先行，標記為輔**：絕對不可為了使用圖形標記而勉強湊題目（例如用戶範圍無要求出圓形，就絕對不准為了用圓形標記而硬出圓形題）。
+                2. **按需精準配對**：如果你自然生成的題目中，剛好 100% 吻合以下【可用圖形庫】的某一種情境，你才可以在該題下方插入標記。若沒有完全吻合的圖形（例如出題出了平行四邊形、梯形），則【絕對不要】插入任何標記，保持純文字即可。
+                3. **嚴禁順序循環**：絕對不准按照庫的列表順序機械式輪流出題！必須隨機、自然地根據題型分佈。如果一整份卷完全沒有適合的題目，你完全不用插入任何標記。
+                4. **動態數值對接**：當確定使用標記時，必須把題目裡的真實數字無縫替換入 `r1, w, h, b, l` 等變數中。
+
+                【可用圖形庫】（僅在題目完全脗合時使用，不用勉強全部用齊）：
+                - 若題目涉及「三個圓相連/求半徑」，才可用：[GEOMETRIC:three_circles_linear:r1=大圓數字;r3=小圓數字]
+                - 若題目涉及「長方形內有圓形/求面積周長」，才可用：[GEOMETRIC:circles_in_rectangle:w=長數字;h=闊數字]
+                - 若題目涉及「同心圓/大圓小圓重疊」，才可用：[GEOMETRIC:concentric_overlap:d1=大圓直徑數字]
+                - 若題目涉及「單純的三角形求面積/底高」，才可用：[GEOMETRIC:triangle:b=底數字;h=高數字]
+                - 若題目涉及「單純的長方體求體積/表面積」，才可用：[GEOMETRIC:cuboid_volume:l=長數字;w=闊數字;h=高數字]
                 """
 
             tasks = []
@@ -790,7 +786,7 @@ with tab_kb:
             cols = st.columns(4)
             for i, b64_data in enumerate(st.session_state['working_images']):
                 with cols[i % 4]:
-                    clean_src = b64_data if b64_data.startswith("data:image") else f"data:image/jpeg;base64,{clean_b64_data}"
+                    clean_src = b64_data if b64_data.startswith("data:image") else f"data:image/jpeg;base64,{b64_data}"
                     st.image(clean_src, use_container_width=True)
                     if st.button("❌ 刪除", key=f"del_img_btn_{i}"):
                         st.session_state['working_images'].pop(i)
