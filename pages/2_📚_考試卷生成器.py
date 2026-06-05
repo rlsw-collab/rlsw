@@ -12,8 +12,8 @@ import base64
 # ==========================================
 st.set_page_config(page_title="香港小學測驗考試卷生成器", layout="wide")
 
-# 🆕 升級 v1.11.8：印刷排版完美進化！重構計算題與文字題排版引擎，支援多行題目資料與內文完整黏合，確保四行答題線 100% 精準生成在題目最底部！
-APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.8"
+# 🆕 升級 v1.11.9：幾何大解鎖版！大改出題 Prompt 與底層 SVG 動態渲染器，引導 GPT-4o 根據題目數字自由、動態地灌入幾何參數，實現真正千變萬化的智能出題！
+APP_TITLE = "📚 香港小學測驗/考試卷生成工具 v1.11.9"
 
 # 注入母網頁的 @media print 打印樣式
 st.markdown("""
@@ -231,7 +231,7 @@ def call_pure_free_multiverse_ai(messages, is_json=True):
     return None
 
 # ==========================================
-# 🎨 🛠️ 幾何圖形 SVG 動態渲染器 🛠️ 🎨
+# 🎨 🛠️ 幾何圖形 SVG 動態渲染器 (全面智能化升級) 🛠️ 🎨
 # ==========================================
 def draw_svg_geometry(marker_str):
     try:
@@ -240,13 +240,16 @@ def draw_svg_geometry(marker_str):
         if len(parts) < 3: return ""
         g_type = parts[1].strip()
         param_pairs = parts[2].split(";")
+        
+        # 動態解構 AI 填入的數值
         params = {}
         for pair in param_pairs:
             if "=" in pair:
                 k, v = pair.split("=")
-                params[k.strip()] = v.strip()
+                params[k.strip().lower()] = v.strip()
                 
         svg_code = ""
+        # 1. 三圓並列或相切 (動態半徑比例與數字)
         if g_type == "three_circles_linear":
             r1 = params.get("r1", "10")
             r3 = params.get("r3", "7")
@@ -260,27 +263,29 @@ def draw_svg_geometry(marker_str):
                 <circle cx="45" cy="75" r="2.5" fill="black"/><text x="40" y="95" font-size="13" font-family="sans-serif">P</text>
                 <circle cx="85" cy="75" r="2.5" fill="black"/><text x="80" y="95" font-size="13" font-family="sans-serif">Q</text>
                 <circle cx="180" cy="75" r="2.5" fill="black"/><text x="175" y="95" font-size="13" font-family="sans-serif">R</text>
-                <text x="50" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑/Radius {r1}</text>
-                <text x="165" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑/Radius {r3}</text>
+                <text x="50" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑/Radius: {r1}cm</text>
+                <text x="165" y="65" font-size="11" font-weight="bold" font-family="sans-serif">半徑/Radius: {r3}cm</text>
             </svg>
             </div>
             """
+        # 2. 長方形嵌入圓形 (長方形闊會隨住高比例動態拉伸)
         elif g_type == "circles_in_rectangle":
-            w = params.get("w", "24")
-            h = params.get("h", "12")
+            w_val = params.get("w", "24")
+            h_val = params.get("h", "12")
             svg_code = f"""
             <div class="geo-container" style="text-align:center; margin:15px 0;">
             <svg width="260" height="140" style="background:white; border:1px solid #ddd; border-radius:6px; display:inline-block;">
                 <rect x="20" y="20" width="220" height="100" stroke="black" stroke-width="2" fill="none" />
-                <circle cx="70" cy="70" r="50" stroke="black" stroke-width="1.5" fill="none" />
-                <circle cx="170" cy="70" r="50" stroke="black" stroke-width="1.5" fill="none" />
-                <line x1="70" y1="70" x2="120" y2="70" stroke="black" stroke-width="1.2" />
+                <circle cx="70" cy="70" r="48" stroke="black" stroke-width="1.5" fill="none" />
+                <circle cx="170" cy="70" r="48" stroke="black" stroke-width="1.5" fill="none" />
+                <line x1="70" y1="70" x2="118" y2="70" stroke="black" stroke-width="1.2" />
                 <circle cx="70" cy="70" r="2" fill="black" />
-                <text x="110" y="15" font-size="12" font-weight="bold" font-family="sans-serif">長/L = {w}</text>
-                <text x="25" y="65" font-size="11" font-family="sans-serif" transform="rotate(-90 25,65)">闊/W = {h}</text>
+                <text x="110" y="16" font-size="12" font-weight="bold" font-family="sans-serif">長/L = {w_val}</text>
+                <text x="25" y="65" font-size="11" font-family="sans-serif" transform="rotate(-90 25,65)">闊/W = {h_val}</text>
             </svg>
             </div>
             """
+        # 3. 大小同心圓重疊
         elif g_type == "concentric_overlap":
             d1 = params.get("d1", "16")
             svg_code = f"""
@@ -289,31 +294,33 @@ def draw_svg_geometry(marker_str):
                 <circle cx="110" cy="80" r="60" stroke="black" stroke-width="1.8" fill="none" />
                 <circle cx="110" cy="110" r="30" stroke="black" stroke-width="1.5" fill="none" />
                 <circle cx="110" cy="80" r="2.5" fill="black" />
-                <text x="115" y="75" font-size="12" font-family="sans-serif">O (大圓心/Center)</text>
+                <text x="115" y="75" font-size="12" font-family="sans-serif">O (大圓心)</text>
                 <circle cx="110" cy="110" r="2" fill="black" />
                 <line x1="110" y1="20" x2="110" y2="140" stroke="black" stroke-width="1" stroke-dasharray="3" />
-                <text x="115" y="50" font-size="11" font-weight="bold" font-family="sans-serif">大圓直徑/Diameter = {d1}</text>
+                <text x="115" y="45" font-size="11" font-weight="bold" font-family="sans-serif">大圓直徑 = {d1}</text>
             </svg>
             </div>
             """
+        # 4. 三角形求底高面積 (動態數字標示)
         elif g_type == "triangle":
-            b = params.get("b", "15")
-            h = params.get("h", "10")
+            b_val = params.get("b", "15")
+            h_val = params.get("h", "10")
             svg_code = f"""
             <div class="geo-container" style="text-align:center; margin:15px 0;">
             <svg width="240" height="150" style="background:white; border:1px solid #ddd; border-radius:6px; display:inline-block;">
                 <polygon points="40,120 200,120 150,30" stroke="black" stroke-width="1.8" fill="none" />
                 <line x1="150" y1="30" x2="150" y2="120" stroke="black" stroke-width="1.2" stroke-dasharray="3" />
                 <rect x="145" y="115" width="5" height="5" stroke="black" stroke-width="1" fill="none" />
-                <text x="100" y="135" font-size="12" font-weight="bold" font-family="sans-serif">底/Base = {b}</text>
-                <text x="160" y="80" font-size="12" font-weight="bold" font-family="sans-serif">高/Height = {h}</text>
+                <text x="100" y="135" font-size="12" font-weight="bold" font-family="sans-serif">底/Base = {b_val}</text>
+                <text x="160" y="80" font-size="12" font-weight="bold" font-family="sans-serif">高/Height = {h_val}</text>
             </svg>
             </div>
             """
+        # 5. 立體長方體求體積
         elif g_type == "cuboid_volume":
-            l = params.get("l", "12")
-            w = params.get("w", "8")
-            h = params.get("h", "5")
+            l_val = params.get("l", "12")
+            w_val = params.get("w", "8")
+            h_val = params.get("h", "5")
             svg_code = f"""
             <div class="geo-container" style="text-align:center; margin:15px 0;">
             <svg width="260" height="160" style="background:white; border:1px solid #ddd; border-radius:6px; display:inline-block;">
@@ -323,9 +330,9 @@ def draw_svg_geometry(marker_str):
                 <line x1="40" y1="120" x2="90" y2="90" stroke="black" stroke-width="1.2" stroke-dasharray="3" />
                 <line x1="90" y1="90" x2="210" y2="90" stroke="black" stroke-width="1.2" stroke-dasharray="3" />
                 <line x1="90" y1="90" x2="90" y2="30" stroke="black" stroke-dasharray="3" stroke-width="1.2" />
-                <text x="80" y="138" font-size="12" font-weight="bold" font-family="sans-serif">長/L = {l}</text>
-                <text x="185" y="110" font-size="12" font-weight="bold" font-family="sans-serif">闊/W = {w}</text>
-                <text x="10" y="90" font-size="12" font-weight="bold" font-family="sans-serif">高/H = {h}</text>
+                <text x="80" y="138" font-size="12" font-weight="bold" font-family="sans-serif">長 = {l_val}</text>
+                <text x="185" y="110" font-size="12" font-weight="bold" font-family="sans-serif">闊 = {w_val}</text>
+                <text x="10" y="90" font-size="12" font-weight="bold" font-family="sans-serif">高 = {h_val}</text>
             </svg>
             </div>
             """
@@ -359,15 +366,12 @@ def python_layout_engine(raw_text, is_answer_key=False):
     processed_lines = []
     current_section = ""
     
-    # 🌟 緩存機制：用於將長題目的資料、幾何圖形跟問題內文全部組合完畢，再統一放答題線
     buffered_question_lines = []
     in_applied_section = False
 
     def flush_question_buffer():
         if not buffered_question_lines: return
-        # 將題目緩存輸出
         processed_lines.append(f'<div class="question-text">{"".join(buffered_question_lines)}</div>')
-        # 🌟 完美排版：只有在非答案頁（學生卷）時，才在整個題目區塊最底部放上4行答題線
         if not is_answer_key:
             processed_lines.append('<div class="write-zone">' + '<div class="row-line"></div>'*4 + '</div>')
         buffered_question_lines.clear()
@@ -377,7 +381,7 @@ def python_layout_engine(raw_text, is_answer_key=False):
         clean_line = line.strip()
         
         if any(s in clean_line for s in ["部：", "部分：", "部", "部分", "Section:", "Part:"]):
-            flush_question_buffer() # 跨區前先清空舊緩存
+            flush_question_buffer()
             current_section = clean_line
             in_applied_section = any(s in current_section for s in ["第三", "第四", "計算", "應用題", "文字題", "長題目", "Calculation", "Word", "Long Questions"])
             processed_lines.append(f'<div class="exam-section-header">{clean_line}</div>')
@@ -393,7 +397,6 @@ def python_layout_engine(raw_text, is_answer_key=False):
             processed_lines.append(f'<div class="exam-user-info">{clean_line}</div>')
             continue
 
-        # 幾何SVG解析
         geo_match = re.search(r'(\[GEOMETRIC:[^\]]+\])', line)
         if geo_match:
             full_marker = geo_match.group(1)
@@ -405,7 +408,6 @@ def python_layout_engine(raw_text, is_answer_key=False):
                 processed_lines.append(f'<div>{line_html}</div>')
             continue
 
-        # 多項選擇題
         opt_starts = list(re.finditer(r'[○●]?\s*[A-D]\.\s+', line))
         if opt_starts:
             flush_question_buffer()
@@ -426,25 +428,20 @@ def python_layout_engine(raw_text, is_answer_key=False):
                     processed_lines.append(f'<div class="mc-option"><span class="mc-circle">○</span> {opt_str}</div>')
             continue
 
-        # 答案詳解模式直接渲染
         if is_answer_key and (clean_line.startswith("詳解：") or re.match(r'^\d+\.', clean_line) or clean_line.startswith("答案是") or clean_line.startswith("答案：")):
             flush_question_buffer()
             line = convert_to_vertical_fractions(line)
             processed_lines.append(f'<div style="margin-bottom:8px; line-height:2.5;">{line}</div>')
             continue
 
-        # 🌟 核心修正點：如果是在計算題或文字應用題部分
         if in_applied_section:
-            # 如果這一行是新題目數字開頭（例如：2. 或者是 二.），就把舊的題目打包、放答題線，然後開始新一題
             if re.match(r'^\d+\.', clean_line) or re.match(r'^[一二三四五六七八九十]+\.', clean_line):
                 flush_question_buffer()
-            
             line = re.sub(r'([_＿]{2,})', r'<span class="fill-blank-underline"></span>', line)
             line = convert_to_vertical_fractions(line)
             buffered_question_lines.append(f'<div>{line}</div>')
             continue
 
-        # 普通文字、填充題
         line = re.sub(r'([_＿]{2,})', r'<span class="fill-blank-underline"></span>', line)
         line = re.sub(r'([\(（])\s{2,}([\)）])', r'\1 <span class="fill-blank-underline"></span> \2', line)
         line = convert_to_vertical_fractions(line)
@@ -457,7 +454,6 @@ def python_layout_engine(raw_text, is_answer_key=False):
 
         processed_lines.append(f'<div>{line}</div>')
         
-    # 結尾收尾：清空最後剩餘的緩存題目與答題線
     flush_question_buffer()
     return "\n".join(processed_lines)
 
@@ -578,14 +574,22 @@ with tab_exam:
 
             has_geometry = any(kw in final_vault_text.lower() for kw in ["圓", "三角", "面積", "體積", "長方體", "正方體", "circle", "triangle", "area", "volume", "cuboid"])
             geo_rule = ""
+            
+            # 🌟 核心進化：重新編寫 Prompt 命令，徹底解鎖並逼迫 GPT-4o 動態填入他所設計的數值參數
             if has_geometry:
                 geo_rule = f"""
-                ⚠️【核心幾何命令】：考量到本次範圍涉及幾何，你必須在題目中穿插嵌入幾何圖形標記。
-                - [GEOMETRIC:three_circles_linear:r1=大圓半徑;r2=中圓半徑;r3=小圓半徑]
-                - [GEOMETRIC:circles_in_rectangle:w=長方形長;h=長方形闊]
-                - [GEOMETRIC:concentric_overlap:d1=大圓直徑]
-                - [GEOMETRIC:triangle:b=三角形底;h=三角形高]
-                - [GEOMETRIC:cuboid_volume:l=長方體長;w=長方體闊;h=長方體高]
+                ⚠️【幾何圖形智能嵌入核心命令】：
+                由於本次考試範圍涉及幾何，你必須根據你出的題目情境，在適當題目（例如求面積、圓心題目）的下方或中間，嵌入幾何圖形標記。
+                你必須將標記中的數值變數（如 r1, w, h, b, h, l）替換為你該道題目中真實出現的實際數字，不能直接寫文字範例！
+                
+                可用圖形庫與注入規範（請精準根據題目數字動態替換）：
+                - 三圓直線排列：[GEOMETRIC:three_circles_linear:r1=填入大圓半徑數字;r3=填入小圓半徑數字]
+                - 長方形嵌雙圓：[GEOMETRIC:circles_in_rectangle:w=填入長方形長數字;h=填入長方形闊數字]
+                - 同心重疊圓：[GEOMETRIC:concentric_overlap:d1=填入大圓直徑數字]
+                - 三角形底高：[GEOMETRIC:triangle:b=填入底邊數字;h=填入高數字]
+                - 立體長方體：[GEOMETRIC:cuboid_volume:l=填入長數字;w=填入闊數字;h=填入高數字]
+                
+                範例：若你設計的題目是「一個三角形的底是 14cm，高是 9cm」，你必須在該題文字後緊貼輸出：[GEOMETRIC:triangle:b=14;h=9]
                 """
 
             tasks = []
@@ -786,7 +790,7 @@ with tab_kb:
             cols = st.columns(4)
             for i, b64_data in enumerate(st.session_state['working_images']):
                 with cols[i % 4]:
-                    clean_src = b64_data if b64_data.startswith("data:image") else f"data:image/jpeg;base64,{b64_data}"
+                    clean_src = b64_data if b64_data.startswith("data:image") else f"data:image/jpeg;base64,{clean_b64_data}"
                     st.image(clean_src, use_container_width=True)
                     if st.button("❌ 刪除", key=f"del_img_btn_{i}"):
                         st.session_state['working_images'].pop(i)
